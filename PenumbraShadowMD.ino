@@ -67,9 +67,11 @@
 #define USE_PREFERENCES
 #define USE_SABERTOOTH_PACKET_SERIAL
 //#define USE_CYTRON_PACKET_SERIAL
+#define USE_PWM_DOME_MOTOR_DRIVER
 //#define USE_MP3_TRIGGER
 //#define USE_DFMINI_PLAYER
 #define USE_HCR_VOCALIZER
+//#define ENABLE_BODY_MD_SERIAL
 
 //For Speed Setting (Normal): set this to whatever speeds works for you. 0-stop, 127-full speed.
 #define DEFAULT_DRIVE_SPEED_NORMAL          70
@@ -464,6 +466,10 @@ int marcDuinoBaudRate = DEFAULT_MARCDUINO_BAUD;
 #include <motor/CytronSmartDriveDuoDriver.h>
 #endif
 
+#ifdef USE_PWM_DOME_MOTOR_DRIVER
+#include <DRV8871Driver.h>
+#endif
+
 #include "pin-map.h"
 
 #define CONSOLE_BUFFER_SIZE     300
@@ -505,10 +511,11 @@ int domeToggleButtonCounter = 0;
 
 #ifdef USE_SABERTOOTH_PACKET_SERIAL
 SabertoothDriver FootMotorImpl(FOOT_MOTOR_ADDR, MOTOR_SERIAL);
-SabertoothDriver DomeMotorImpl(DOME_MOTOR_ADDR, MOTOR_SERIAL);
-
 SabertoothDriver* FootMotor=&FootMotorImpl;
+    #ifndef USE_PWM_DOME_MOTOR_DRIVER
+SabertoothDriver DomeMotorImpl(DOME_MOTOR_ADDR, MOTOR_SERIAL);
 SabertoothDriver* DomeMotor=&DomeMotorImpl;
+    #endif
 #endif
 
 #ifdef USE_CYTRON_PACKET_SERIAL
@@ -517,6 +524,11 @@ CytronSmartDriveDuoMDDS10Driver DomeMotorImpl(DOME_MOTOR_ADDR, MOTOR_SERIAL);
 
 CytronSmartDriveDuoDriver* FootMotor=&FootMotorImpl;
 CytronSmartDriveDuoDriver* DomeMotor=&DomeMotorImpl;
+#endif
+
+#ifdef USE_PWM_DOME_MOTOR_DRIVER
+DRV8871Driver DomeMotorImpl(DOUT1_PIN, DOUT2_PIN);
+DRV8871Driver* DomeMotor=&DomeMotorImpl;
 #endif
 
 ///////Setup for USB and Bluetooth Devices////////////////////////////
@@ -902,13 +914,16 @@ void setup()
     FootMotor->setDeadband(driveDeadBandRange);
     FootMotor->stop();
     DomeMotor->setTimeout(20);      //DMB:  How low can we go for safety reasons?  multiples of 100ms
+    DomeMotor->setRamping(0.8);
     // DomeMotor->stop();
 
     // //Setup for MD_SERIAL MarcDuino Dome Control Board
     MD_SERIAL_INIT(marcDuinoBaudRate);
 
     //Setup for BODY_MD_SERIAL Optional MarcDuino Control Board for Body Panels
+#if defined(ENABLE_BODY_MD_SERIAL)
     BODY_MD_SERIAL_INIT(marcDuinoBaudRate);
+#endif
 
     // randomSeed(analogRead(0));  // random number seed for dome automation   
 
@@ -950,8 +965,10 @@ void sendMarcCommand(const char* cmd)
 
 void sendBodyMarcCommand(const char* cmd)
 {
+#if defined(ENABLE_BODY_MD_SERIAL)
     SHADOW_VERBOSE("Sending BODYMARC: \"%s\"\n", cmd)
     BODY_MD_SERIAL.print(cmd); BODY_MD_SERIAL.print("\r");
+#endif
 }
 
 ////////////////////////////////
@@ -970,6 +987,9 @@ void reboot()
 
 void loop()
 {
+#ifdef USE_PWM_DOME_MOTOR_DRIVER
+    DomeMotor->task();
+#endif
     //LOOP through functions from highest to lowest priority.
     if (!readUSB())
         return;
@@ -1397,17 +1417,19 @@ void loop()
         }
     }
 
-    // Clear inbound buffer of any data sent form the MarcDuino board
+    // Clear inbound buffer of any data sent from the MarcDuino board
     if (MD_SERIAL.available())
     {
         int ch = MD_SERIAL.read();
         Serial.print((char)ch);
     }
+#if defined(ENABLE_BODY_MD_SERIAL)
     if (BODY_MD_SERIAL.available())
     {
         int ch = BODY_MD_SERIAL.read();
         Serial.print((char)ch);
     }
+#endif
 }
 
 // =======================================================================================
