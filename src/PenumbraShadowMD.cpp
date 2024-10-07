@@ -62,6 +62,8 @@
 //                        General User Settings
 // ---------------------------------------------------------------------------------------
 
+#include <Arduino.h>
+
 #define PANEL_COUNT 10                // Number of panels
 #define USE_DEBUG                     // Define to enable debug diagnostic
 #define USE_PREFERENCES
@@ -467,7 +469,7 @@ int marcDuinoBaudRate = DEFAULT_MARCDUINO_BAUD;
 #endif
 
 #ifdef USE_PWM_DOME_MOTOR_DRIVER
-#include <DRV8871Driver.h>
+#include "motor/DRV8871Driver.h"
 #endif
 
 #include "pin-map.h"
@@ -530,6 +532,19 @@ CytronSmartDriveDuoDriver* DomeMotor=&DomeMotorImpl;
 DRV8871Driver DomeMotorImpl(DOUT1_PIN, DOUT2_PIN);
 DRV8871Driver* DomeMotor=&DomeMotorImpl;
 #endif
+
+//Forward declarations
+void onInitPS3NavFoot();
+void onInitPS3NavDome();
+bool readUSB();
+void footMotorDrive();
+void domeDrive();
+void marcDuinoDome();
+void marcDuinoFoot();
+void toggleSettings();
+void custMarcDuinoPanel();
+void autoDome();
+String getLastConnectedBtMAC();
 
 ///////Setup for USB and Bluetooth Devices////////////////////////////
 USB Usb;
