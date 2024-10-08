@@ -63,13 +63,13 @@
 // ---------------------------------------------------------------------------------------
 
 #include <Arduino.h>
+#include "pin-map.h"
+#include "motor/MotorDriver.h"
 
 #define PANEL_COUNT 10                // Number of panels
 #define USE_DEBUG                     // Define to enable debug diagnostic
 #define USE_PREFERENCES
-#define USE_SABERTOOTH_PACKET_SERIAL
-//#define USE_CYTRON_PACKET_SERIAL
-#define USE_PWM_DOME_MOTOR_DRIVER
+
 //#define USE_MP3_TRIGGER
 //#define USE_DFMINI_PLAYER
 #define USE_HCR_VOCALIZER
@@ -436,12 +436,24 @@ MARCDUINO_ACTION(FTbtnDown_L1_MD, "#35")        // Arrow Down + L1
 // ---------------------------------------------------------------------------------------
 //                          Drive Controller Settings
 // ---------------------------------------------------------------------------------------
+#include "motor/MotorDriver.h"
+#include "motor/DRV8871Driver.h"
+#include "motor/SabertoothWrapper.h"
+//#include "motor/CytronSmartDriveDuoWrapper.h"
 
 int motorControllerBaudRate = DEFAULT_MOTOR_BAUD;
 int marcDuinoBaudRate = DEFAULT_MARCDUINO_BAUD;
 
-#define FOOT_MOTOR_ADDR      128      // Serial Address for Foot Motor
-#define DOME_MOTOR_ADDR      129      // Serial Address for Dome Motor
+#define FOOT_MOTOR_ADDRESS 128
+SabertoothWrapper MotorDriverImpl(FOOT_MOTOR_ADDRESS, MOTOR_SERIAL);
+//CytronSmartDriveDuoMDDS30Wrapper MotorDriverImpl(FOOT_MOTOR_ADDRESS, MOTOR_SERIAL);
+MotorDriver *FootMotor = &MotorDriverImpl;
+
+#define DOME_MOTOR_ADDRESS 129
+//SabertoothWrapper DomeDriverImpl(DOME_MOTOR_ADDRESS, MOTOR_SERIAL);
+//CytronSmartDriveDuoMDDS30Wrapper DomeDriverImpl(DOME_MOTOR_ADDRESS, MOTOR_SERIAL);
+DRV8871Driver DomeDriverImpl(DOUT1_PIN, DOUT2_PIN);
+MotorDriver *DomeMotor = &DomeDriverImpl;
 
 #define ENABLE_UHS_DEBUGGING 1
 
@@ -459,20 +471,6 @@ int marcDuinoBaudRate = DEFAULT_MARCDUINO_BAUD;
 #ifdef dobogusinclude
 #include <spi4teensy3.h>
 #endif
-
-#ifdef USE_SABERTOOTH_PACKET_SERIAL
-#include <motor/SabertoothDriver.h>
-#endif
-
-#ifdef USE_CYTRON_PACKET_SERIAL
-#include <motor/CytronSmartDriveDuoDriver.h>
-#endif
-
-#ifdef USE_PWM_DOME_MOTOR_DRIVER
-#include "motor/DRV8871Driver.h"
-#endif
-
-#include "pin-map.h"
 
 #define CONSOLE_BUFFER_SIZE     300
 static unsigned sPos;
@@ -510,28 +508,6 @@ int serialLatency = 25;   //This is a delay factor in ms to prevent queueing of 
 int marcDuinoButtonCounter = 0;
 int speedToggleButtonCounter = 0;
 int domeToggleButtonCounter = 0;
-
-#ifdef USE_SABERTOOTH_PACKET_SERIAL
-SabertoothDriver FootMotorImpl(FOOT_MOTOR_ADDR, MOTOR_SERIAL);
-SabertoothDriver* FootMotor=&FootMotorImpl;
-    #ifndef USE_PWM_DOME_MOTOR_DRIVER
-SabertoothDriver DomeMotorImpl(DOME_MOTOR_ADDR, MOTOR_SERIAL);
-SabertoothDriver* DomeMotor=&DomeMotorImpl;
-    #endif
-#endif
-
-#ifdef USE_CYTRON_PACKET_SERIAL
-CytronSmartDriveDuoMDDS30Driver FootMotorImpl(FOOT_MOTOR_ADDR, MOTOR_SERIAL);
-CytronSmartDriveDuoMDDS10Driver DomeMotorImpl(DOME_MOTOR_ADDR, MOTOR_SERIAL);
-
-CytronSmartDriveDuoDriver* FootMotor=&FootMotorImpl;
-CytronSmartDriveDuoDriver* DomeMotor=&DomeMotorImpl;
-#endif
-
-#ifdef USE_PWM_DOME_MOTOR_DRIVER
-DRV8871Driver DomeMotorImpl(DOUT1_PIN, DOUT2_PIN);
-DRV8871Driver* DomeMotor=&DomeMotorImpl;
-#endif
 
 //Forward declarations
 void onInitPS3NavFoot();
@@ -919,18 +895,16 @@ void setup()
     PS3NavFoot->attachOnInit(onInitPS3NavFoot); // onInitPS3NavFoot is called upon a new connection
     PS3NavDome->attachOnInit(onInitPS3NavDome);
 
-    //Setup for SABERTOOTH_SERIAL Motor Controllers - Sabertooth (Feet) 
+    //Setup for Motor Controllers
     MOTOR_SERIAL_INIT(motorControllerBaudRate);
-    // Don't use autobaud(). It is flaky and causes delays. Default baud rate is 9600
-    // If your syren is set to something else call setBaudRate(9600) below or change it
-    // using Describe.
-    // FootMotor->setBaudRate(9600);   // Send the autobaud command to the Sabertooth controller(s).
-    FootMotor->setTimeout(10);      //DMB:  How low can we go for safety reasons?  multiples of 100ms
+    // If your controller is set to something other than 9600Baud call setBaudRate(9600) below
+    // FootMotor->setBaudRate(9600);
+    FootMotor->setTimeout(1000);      //DMB:  How low can we go for safety reasons?
     FootMotor->setDeadband(driveDeadBandRange);
     FootMotor->stop();
-    DomeMotor->setTimeout(20);      //DMB:  How low can we go for safety reasons?  multiples of 100ms
+    DomeMotor->setTimeout(2000);      //DMB:  How low can we go for safety reasons?
     DomeMotor->setRamping(0.8);
-    // DomeMotor->stop();
+    DomeMotor->stop();
 
     // //Setup for MD_SERIAL MarcDuino Dome Control Board
     MD_SERIAL_INIT(marcDuinoBaudRate);
@@ -1458,7 +1432,7 @@ bool ps3FootMotorDrive(PS3BT* myPS3 = PS3NavFoot)
   
     if (isPS3NavigatonInitialized)
     {    
-         // Additional fault control.  Do NOT send additional commands to Sabertooth if no controllers have initialized.
+         // Additional fault control.  Do NOT send additional commands to motord if no controllers have initialized.
         if (!isStickEnabled)
         {
         #ifdef SHADOW_VERBOSE
