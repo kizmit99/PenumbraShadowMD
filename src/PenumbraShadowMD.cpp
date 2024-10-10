@@ -427,9 +427,9 @@ void reboot()
 
 void loop()
 {
-#ifdef USE_PWM_DOME_MOTOR_DRIVER
     DomeMotor->task();
-#endif
+    FootMotor->task();
+    
     //LOOP through functions from highest to lowest priority.
     if (!readUSB())
         return;
