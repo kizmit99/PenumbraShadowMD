@@ -72,6 +72,8 @@
 #include <Arduino.h>
 #include "pin-map.h"
 #include "motor/MotorDriver.h"
+#include "controller/GameController.h"
+#include "controller/DualSonyMoveController.h"
 #include "MarcduinoTriggers.h"
 
 //#define USE_MP3_TRIGGER
@@ -243,20 +245,21 @@ void onInitPS3NavDome();
 bool readUSB();
 void footMotorDrive();
 void domeDrive();
-void marcDuinoDome();
-void marcDuinoFoot();
-void toggleSettings();
 void custMarcDuinoPanel();
 void autoDome();
 String getLastConnectedBtMAC();
+void triggerActions();
 
-///////Setup for USB and Bluetooth Devices////////////////////////////
-USB Usb;
-BTD Btd(&Usb);
-PS3BT PS3NavFootImpl(&Btd);
-PS3BT PS3NavDomeImpl(&Btd);
-PS3BT* PS3NavFoot=&PS3NavFootImpl;
-PS3BT* PS3NavDome=&PS3NavDomeImpl;
+// ///////Setup for USB and Bluetooth Devices////////////////////////////
+// USB Usb;
+// BTD Btd(&Usb);
+// PS3BT PS3NavFootImpl(&Btd);
+// PS3BT PS3NavDomeImpl(&Btd);
+// PS3BT* PS3NavFoot=&PS3NavFootImpl;
+// PS3BT* PS3NavDome=&PS3NavDomeImpl;
+
+DualSonyMoveController sonyControllers;
+GameController* controller = &sonyControllers;
 
 //Used for PS3 Fault Detection
 uint32_t msgLagTime = 0;
@@ -343,9 +346,9 @@ void setup()
 
     DEBUG_PRINTLN("Bluetooth Library Started");
 
-    //Setup for PS3
-    PS3NavFoot->attachOnInit(onInitPS3NavFoot); // onInitPS3NavFoot is called upon a new connection
-    PS3NavDome->attachOnInit(onInitPS3NavDome);
+    // //Setup for PS3
+    // PS3NavFoot->attachOnInit(onInitPS3NavFoot); // onInitPS3NavFoot is called upon a new connection
+    // PS3NavDome->attachOnInit(onInitPS3NavDome);
 
     //Setup for Motor Controllers
     MOTOR_SERIAL_INIT(motorControllerBaudRate);
@@ -381,7 +384,7 @@ void setup()
     sMarcSound.setVolume(preferences.getInt(PREFERENCE_MARCSOUND_VOLUME, MARC_SOUND_VOLUME) / 1000.0);
 #endif
 
-    if (Usb.Init() == -1)
+    if (!controller->init())
     {
         DEBUG_PRINTLN("OSC did not start");
         while (1); //halt
@@ -429,16 +432,14 @@ void loop()
 {
     DomeMotor->task();
     FootMotor->task();
-    
+
     //LOOP through functions from highest to lowest priority.
     if (!readUSB())
         return;
     
     footMotorDrive();
     domeDrive();
-    marcDuinoDome();
-    marcDuinoFoot();
-    toggleSettings();
+    triggerActions();
     custMarcDuinoPanel();     
 #if defined(MARC_SOUND_PLAYER)
     sMarcSound.idle();
@@ -533,7 +534,6 @@ void loop()
             }
             else if (startswith(cmd, "#SMCONFIG"))
             {
-                printf("Drive Speed Normal:  %3d (#SMNORMALSPEED) [0..127]\n", drivespeed1);
                 printf("Drive Speed Normal:  %3d (#SMNORMALSPEED) [0..127]\n", drivespeed1);
                 printf("Drive Speed Max:     %3d (#SMMAXSPEED)    [0..127]\n", drivespeed2);
                 printf("Turn Speed:          %3d (#SMTURNSPEED)   [0..127]\n", turnspeed);
@@ -878,7 +878,7 @@ void loop()
 //           footDrive Motor Control Section
 // =======================================================================================
 
-bool ps3FootMotorDrive(PS3BT* myPS3 = PS3NavFoot)
+bool ps3FootMotorDrive()
 {
     int stickSpeed = 0;
     int turnnum = 0;
@@ -889,7 +889,7 @@ bool ps3FootMotorDrive(PS3BT* myPS3 = PS3NavFoot)
         if (!isStickEnabled)
         {
         #ifdef SHADOW_VERBOSE
-            if (abs(myPS3->getAnalogHat(LeftHatY)-128) > joystickFootDeadZoneRange)
+            if (abs(controller->getJoystick(GameController::Drive, GameController::Y)) > joystickFootDeadZoneRange)
             {
                 SHADOW_VERBOSE("Drive Stick is disabled\n")
             }
@@ -905,7 +905,7 @@ bool ps3FootMotorDrive(PS3BT* myPS3 = PS3NavFoot)
             }
             return false;
         }
-        else if (!myPS3->PS3NavigationConnected)
+        else if (!controller->isConnected())
         {
             if (!isFootMotorStopped)
             {
@@ -918,32 +918,20 @@ bool ps3FootMotorDrive(PS3BT* myPS3 = PS3NavFoot)
           
             return false;
         }
-        else if (myPS3->getButtonPress(L2) || myPS3->getButtonPress(L1))
-        {
-            if (!isFootMotorStopped)
-            {
-                FootMotor->stop();
-                isFootMotorStopped = true;
-                footDriveSpeed = 0;
-
-                SHADOW_VERBOSE("\n***Foot Motor STOPPED***\n")              
-            }
-            return false;
-        }
         else
         {
-            int joystickPosition = myPS3->getAnalogHat(LeftHatY);
+            int joystickPosition = controller->getJoystick(GameController::Drive, GameController::Y);
           
             if (overSpeedSelected) //Over throttle is selected
             {
-                stickSpeed = (map(joystickPosition, 0, 255, -drivespeed2, drivespeed2));   
+                stickSpeed = (map(joystickPosition, -128, 127, -drivespeed2, drivespeed2));   
             }
             else 
             {
-                stickSpeed = (map(joystickPosition, 0, 255, -drivespeed1, drivespeed1));
+                stickSpeed = (map(joystickPosition, -128, 127, -drivespeed1, drivespeed1));
             }
 
-            if ( abs(joystickPosition-128) < joystickFootDeadZoneRange)
+            if ( abs(joystickPosition) < joystickFootDeadZoneRange)
             {
                 // This is RAMP DOWN code when stick is now at ZERO but prior FootSpeed > 20
                 if (abs(footDriveSpeed) > 50)
@@ -1007,17 +995,18 @@ bool ps3FootMotorDrive(PS3BT* myPS3 = PS3NavFoot)
                     footDriveSpeed = stickSpeed;  
                 }
             }
-            turnnum = (myPS3->getAnalogHat(LeftHatX));
+            uint8_t joystick_Y = controller->getJoystick(GameController::Drive, GameController::Y);
+            turnnum = joystick_Y;
 
             //TODO:  Is there a better algorithm here?  
             if ( abs(footDriveSpeed) > 50)
-                turnnum = (map(myPS3->getAnalogHat(LeftHatX), 54, 200, -(turnspeed/4), (turnspeed/4)));
-            else if (turnnum <= 200 && turnnum >= 54)
-                turnnum = (map(myPS3->getAnalogHat(LeftHatX), 54, 200, -(turnspeed/3), (turnspeed/3)));
-            else if (turnnum > 200)
-                turnnum = (map(myPS3->getAnalogHat(LeftHatX), 201, 255, turnspeed/3, turnspeed));
-            else if (turnnum < 54)
-                turnnum = (map(myPS3->getAnalogHat(LeftHatX), 0, 53, -turnspeed, -(turnspeed/3)));
+                turnnum = (map(joystick_Y, -74, 72, -(turnspeed/4), (turnspeed/4)));
+            else if (turnnum <= 72 && turnnum >= -74)
+                turnnum = (map(joystick_Y, -74, 72, -(turnspeed/3), (turnspeed/3)));
+            else if (turnnum > 72)
+                turnnum = (map(joystick_Y, 73, 127, turnspeed/3, turnspeed));
+            else if (turnnum < -74)
+                turnnum = (map(joystick_Y, -128, -75, -turnspeed, -(turnspeed/3)));
               
             if (abs(turnnum) > 5)
             {
@@ -1064,8 +1053,8 @@ void footMotorDrive()
     if ((millis() - previousFootMillis) < serialLatency)
         return;
   
-    if (PS3NavFoot->PS3NavigationConnected)
-        ps3FootMotorDrive(PS3NavFoot);
+    if (controller->isConnected())
+        ps3FootMotorDrive();
 }  
 
 
@@ -1073,13 +1062,13 @@ void footMotorDrive()
 //           domeDrive Motor Control Section
 // =======================================================================================
 
-int ps3DomeDrive(PS3BT* myPS3 = PS3NavDome)
+int ps3DomeDrive()
 {
     int domeRotationSpeed = 0;
-    int joystickPosition = myPS3->getAnalogHat(LeftHatX);
+    int joystickPosition = controller->getJoystick(GameController::Dome, GameController::Y);
         
-    domeRotationSpeed = (map(joystickPosition, 0, 255, -domespeed, domespeed));
-    if ( abs(joystickPosition-128) < joystickDomeDeadZoneRange ) 
+    domeRotationSpeed = (map(joystickPosition, -128, 127, -domespeed, domespeed));
+    if ( abs(joystickPosition) < joystickDomeDeadZoneRange ) 
        domeRotationSpeed = 0;
           
     if (domeRotationSpeed != 0 && domeAutomation == true)  // Turn off dome automation if manually moved
@@ -1132,19 +1121,12 @@ void domeDrive()
   
     int domeRotationSpeed = 0;
     int ps3NavControlSpeed = 0;
-    if (PS3NavDome->PS3NavigationConnected) 
+    if (controller->isConnected()) 
     {
-        ps3NavControlSpeed = ps3DomeDrive(PS3NavDome);
+        ps3NavControlSpeed = ps3DomeDrive();
         domeRotationSpeed = ps3NavControlSpeed; 
 
         rotateDome(domeRotationSpeed,"Controller Move");
-    }
-    else if (PS3NavFoot->PS3NavigationConnected && PS3NavFoot->getButtonPress(L2))
-    {
-        ps3NavControlSpeed = ps3DomeDrive(PS3NavFoot);
-        domeRotationSpeed = ps3NavControlSpeed;
-
-        rotateDome(domeRotationSpeed,"Controller Move");    
     }
     else if (!isDomeMotorStopped)
     {
@@ -1157,10 +1139,10 @@ void domeDrive()
 //                               Toggle Control Section
 // =======================================================================================
 
-void ps3ToggleSettings(PS3BT* myPS3 = PS3NavFoot)
+void handleToggleActions(String action)
 {
     // enable / disable drive stick
-    if (myPS3->getButtonPress(PS) && myPS3->getButtonClick(CROSS))
+    if (action.equals("stickDisable"))
     {
         SHADOW_DEBUG("Disabling the DriveStick\n")
         SHADOW_DEBUG("Stopping Motors\n")
@@ -1171,14 +1153,14 @@ void ps3ToggleSettings(PS3BT* myPS3 = PS3NavFoot)
         footDriveSpeed = 0;
     }
     
-    if(myPS3->getButtonPress(PS) && myPS3->getButtonClick(CIRCLE))
+    if(action.equals("stickEnable"))
     {
         SHADOW_DEBUG("Enabling the DriveStick\n");
         isStickEnabled = true;
     }
     
     // Enable and Disable Overspeed
-    if (myPS3->getButtonPress(L3) && myPS3->getButtonPress(L1) && isStickEnabled)
+    if (action.equals("toggleSpeed") && isStickEnabled)
     {
         if ((millis() - previousSpeedToggleMillis) > 1000)
         {
@@ -1203,7 +1185,7 @@ void ps3ToggleSettings(PS3BT* myPS3 = PS3NavFoot)
     }
    
     // Enable Disable Dome Automation
-    if(myPS3->getButtonPress(L2) && myPS3->getButtonClick(CROSS))
+    if(action.equals("autoDomeOff"))
     {
         domeAutomation = false;
         domeStatus = 0;
@@ -1214,7 +1196,7 @@ void ps3ToggleSettings(PS3BT* myPS3 = PS3NavFoot)
         SHADOW_DEBUG("Dome Automation OFF\n")
     } 
 
-    if(myPS3->getButtonPress(L2) && myPS3->getButtonClick(CIRCLE))
+    if(action.equals("autoDomeOn"))
     {
         domeAutomation = true;
 
@@ -1222,348 +1204,32 @@ void ps3ToggleSettings(PS3BT* myPS3 = PS3NavFoot)
     } 
 }
 
-void toggleSettings()
-{
-    if (PS3NavFoot->PS3NavigationConnected)
-        ps3ToggleSettings(PS3NavFoot);
-}  
+String lastAction;
+uint32_t lastActionTime = 0;
 
-// ====================================================================================================================
-// This function determines if MarcDuino buttons were selected and calls main processing function for FOOT controller
-// ====================================================================================================================
-void marcDuinoFoot()
-{
-    if (PS3NavFoot->PS3NavigationConnected && (PS3NavFoot->getButtonPress(UP) || PS3NavFoot->getButtonPress(DOWN) || PS3NavFoot->getButtonPress(LEFT) || PS3NavFoot->getButtonPress(RIGHT)))
-    {
-        if ((millis() - previousMarcDuinoMillis) > 1000)
-        {
-            marcDuinoButtonCounter = 0;
-            previousMarcDuinoMillis = millis();
-        }
-       marcDuinoButtonCounter += 1;
-    }
-    else
-    {
-        return;    
-    }
-   
-    //------------------------------------ 
-    // Send triggers for the base buttons 
-    //------------------------------------
-    if (PS3NavFoot->getButtonPress(UP) && !PS3NavFoot->getButtonPress(CROSS) && !PS3NavFoot->getButtonPress(CIRCLE) && !PS3NavFoot->getButtonPress(L1) && !PS3NavFoot->getButtonPress(PS) && marcDuinoButtonCounter == 1)
-    {
-        if (PS3NavDome->PS3NavigationConnected && (PS3NavDome->getButtonPress(CROSS) || PS3NavDome->getButtonPress(CIRCLE) || PS3NavDome->getButtonPress(PS)))
-        {
-            // Skip this section
-        }
-        else
-        {
-            btnUP_MD.trigger();
-            return;
-        }
-    }
-    
-    if (PS3NavFoot->getButtonPress(DOWN) && !PS3NavFoot->getButtonPress(CROSS) && !PS3NavFoot->getButtonPress(CIRCLE) && !PS3NavFoot->getButtonPress(L1) && !PS3NavFoot->getButtonPress(PS) && marcDuinoButtonCounter == 1)
-    {
-        if (PS3NavDome->PS3NavigationConnected && (PS3NavDome->getButtonPress(CROSS) || PS3NavDome->getButtonPress(CIRCLE) || PS3NavDome->getButtonPress(PS)))
-        {
-            // Skip this section
-        }
-        else
-        {     
-            btnDown_MD.trigger();
-            return;
-        }
-    }
-    
-    if (PS3NavFoot->getButtonPress(LEFT) && !PS3NavFoot->getButtonPress(CROSS) && !PS3NavFoot->getButtonPress(CIRCLE) && !PS3NavFoot->getButtonPress(L1) && !PS3NavFoot->getButtonPress(PS) && marcDuinoButtonCounter == 1)
-    {
-        if (PS3NavDome->PS3NavigationConnected && (PS3NavDome->getButtonPress(CROSS) || PS3NavDome->getButtonPress(CIRCLE) || PS3NavDome->getButtonPress(PS)))
-        {
-            // Skip this section
-        }
-        else
-        {           
-            btnLeft_MD.trigger();
-            return;
-        }
-    }
-
-    if (PS3NavFoot->getButtonPress(RIGHT) && !PS3NavFoot->getButtonPress(CROSS) && !PS3NavFoot->getButtonPress(CIRCLE) && !PS3NavFoot->getButtonPress(L1) && !PS3NavFoot->getButtonPress(PS) && marcDuinoButtonCounter == 1)
-    {
-        if (PS3NavDome->PS3NavigationConnected && (PS3NavDome->getButtonPress(CROSS) || PS3NavDome->getButtonPress(CIRCLE) || PS3NavDome->getButtonPress(PS)))
-        {
-            // Skip this section
-        }
-        else
-        {     
-            btnRight_MD.trigger();;
-            return;
-        }
-    }
-    
-    //------------------------------------ 
-    // Send triggers for the CROSS + base buttons 
-    //------------------------------------
-    if (((!PS3NavDome->PS3NavigationConnected && PS3NavFoot->getButtonPress(UP) && PS3NavFoot->getButtonPress(CROSS)) || (PS3NavDome->PS3NavigationConnected && PS3NavFoot->getButtonPress(UP) && PS3NavDome->getButtonPress(CROSS))) && marcDuinoButtonCounter == 1)
-    {
-        btnUP_CROSS_MD.trigger();
-        return;        
-    }
-    
-    if (((!PS3NavDome->PS3NavigationConnected && PS3NavFoot->getButtonPress(DOWN) && PS3NavFoot->getButtonPress(CROSS)) || (PS3NavDome->PS3NavigationConnected && PS3NavFoot->getButtonPress(DOWN) && PS3NavDome->getButtonPress(CROSS))) && marcDuinoButtonCounter == 1)
-    {      
-        btnDown_CROSS_MD.trigger();
+void triggerActions() {
+    String action = controller->getAction();
+    if ((action == NULL) ||
+        (action.equals(""))) {
+        //Nothing to do here
         return;
     }
-    
-    if (((!PS3NavDome->PS3NavigationConnected && PS3NavFoot->getButtonPress(LEFT) && PS3NavFoot->getButtonPress(CROSS)) || (PS3NavDome->PS3NavigationConnected && PS3NavFoot->getButtonPress(LEFT) && PS3NavDome->getButtonPress(CROSS))) && marcDuinoButtonCounter == 1)
-    {
-        btnLeft_CROSS_MD.trigger();;
+    uint32_t now = millis();
+    if ((action == lastAction) &&
+        ((now - lastActionTime) < 1000)) {
+        //Skip it
+        return;
+    }
+    lastAction = action;
+    lastActionTime = now;
+
+    MarcduinoButtonAction* mdAction = MarcduinoButtonAction::findAction(action);
+    if (mdAction != NULL) {
+        mdAction->trigger();
         return;
     }
 
-    if (((!PS3NavDome->PS3NavigationConnected && PS3NavFoot->getButtonPress(RIGHT) && PS3NavFoot->getButtonPress(CROSS)) || (PS3NavDome->PS3NavigationConnected && PS3NavFoot->getButtonPress(RIGHT) && PS3NavDome->getButtonPress(CROSS))) && marcDuinoButtonCounter == 1)
-    {
-        btnRight_CROSS_MD.trigger();
-        return;
-    }
-
-    //------------------------------------ 
-    // Send triggers for the CIRCLE + base buttons 
-    //------------------------------------
-    if (((!PS3NavDome->PS3NavigationConnected && PS3NavFoot->getButtonPress(UP) && PS3NavFoot->getButtonPress(CIRCLE)) || (PS3NavDome->PS3NavigationConnected && PS3NavFoot->getButtonPress(UP) && PS3NavDome->getButtonPress(CIRCLE))) && marcDuinoButtonCounter == 1)
-    {
-        btnUP_CIRCLE_MD.trigger();
-        return;
-    }
-    
-    if (((!PS3NavDome->PS3NavigationConnected && PS3NavFoot->getButtonPress(DOWN) && PS3NavFoot->getButtonPress(CIRCLE)) || (PS3NavDome->PS3NavigationConnected && PS3NavFoot->getButtonPress(DOWN) && PS3NavDome->getButtonPress(CIRCLE))) && marcDuinoButtonCounter == 1)
-    {
-        btnDown_CIRCLE_MD.trigger();
-        return;
-    }
-    
-    if (((!PS3NavDome->PS3NavigationConnected && PS3NavFoot->getButtonPress(LEFT) && PS3NavFoot->getButtonPress(CIRCLE)) || (PS3NavDome->PS3NavigationConnected && PS3NavFoot->getButtonPress(LEFT) && PS3NavDome->getButtonPress(CIRCLE))) && marcDuinoButtonCounter == 1)
-    {
-        btnLeft_CIRCLE_MD.trigger();
-        return;
-    }
-
-    if (((!PS3NavDome->PS3NavigationConnected && PS3NavFoot->getButtonPress(RIGHT) && PS3NavFoot->getButtonPress(CIRCLE)) || (PS3NavDome->PS3NavigationConnected && PS3NavFoot->getButtonPress(RIGHT) && PS3NavDome->getButtonPress(CIRCLE))) && marcDuinoButtonCounter == 1)
-    {
-        btnRight_CIRCLE_MD.trigger();
-        return;
-    }
-    
-    //------------------------------------ 
-    // Send triggers for the L1 + base buttons 
-    //------------------------------------
-    if (PS3NavFoot->getButtonPress(UP) && PS3NavFoot->getButtonPress(L1) && marcDuinoButtonCounter == 1)
-    {
-        btnUP_L1_MD.trigger();
-        return;
-    }
-    
-    if (PS3NavFoot->getButtonPress(DOWN) && PS3NavFoot->getButtonPress(L1) && marcDuinoButtonCounter == 1)
-    {
-        btnDown_L1_MD.trigger();
-        return;
-    }
-    
-    if (PS3NavFoot->getButtonPress(LEFT) && PS3NavFoot->getButtonPress(L1) && marcDuinoButtonCounter == 1)
-    {
-        btnLeft_L1_MD.trigger();
-        return;
-    }
-
-    if (PS3NavFoot->getButtonPress(RIGHT) && PS3NavFoot->getButtonPress(L1) && marcDuinoButtonCounter == 1)
-    {
-        btnRight_L1_MD.trigger();
-        return;
-    }
-    
-    //------------------------------------ 
-    // Send triggers for the PS + base buttons 
-    //------------------------------------
-    if (((!PS3NavDome->PS3NavigationConnected && PS3NavFoot->getButtonPress(UP) && PS3NavFoot->getButtonPress(PS)) || (PS3NavDome->PS3NavigationConnected && PS3NavFoot->getButtonPress(UP) && PS3NavDome->getButtonPress(PS))) && marcDuinoButtonCounter == 1)
-    {
-        btnUP_PS_MD.trigger();
-        return;
-    }
-    
-    if (((!PS3NavDome->PS3NavigationConnected && PS3NavFoot->getButtonPress(DOWN) && PS3NavFoot->getButtonPress(PS)) || (PS3NavDome->PS3NavigationConnected && PS3NavFoot->getButtonPress(DOWN) && PS3NavDome->getButtonPress(PS))) && marcDuinoButtonCounter == 1)
-    {
-        btnDown_PS_MD.trigger();
-        return;
-    }
-    
-    if (((!PS3NavDome->PS3NavigationConnected && PS3NavFoot->getButtonPress(LEFT) && PS3NavFoot->getButtonPress(PS)) || (PS3NavDome->PS3NavigationConnected && PS3NavFoot->getButtonPress(LEFT) && PS3NavDome->getButtonPress(PS))) && marcDuinoButtonCounter == 1)
-    {
-        btnLeft_PS_MD.trigger();
-        return;
-    }
-
-    if (((!PS3NavDome->PS3NavigationConnected && PS3NavFoot->getButtonPress(RIGHT) && PS3NavFoot->getButtonPress(PS)) || (PS3NavDome->PS3NavigationConnected && PS3NavFoot->getButtonPress(RIGHT) && PS3NavDome->getButtonPress(PS))) && marcDuinoButtonCounter == 1)
-    {
-        btnRight_PS_MD.trigger();
-        return;
-    }
-}
-
-// ===================================================================================================================
-// This function determines if MarcDuino buttons were selected and calls main processing function for DOME Controller
-// ===================================================================================================================
-void marcDuinoDome()
-{
-    if (PS3NavDome->PS3NavigationConnected && (PS3NavDome->getButtonPress(UP) || PS3NavDome->getButtonPress(DOWN) || PS3NavDome->getButtonPress(LEFT) || PS3NavDome->getButtonPress(RIGHT)))
-    {
-        if ((millis() - previousMarcDuinoMillis) > 1000)
-        {
-            marcDuinoButtonCounter = 0;
-            previousMarcDuinoMillis = millis();
-        }
-        marcDuinoButtonCounter += 1;
-    }
-    else
-    {
-        return;    
-    }
-
-    //------------------------------------ 
-    // Send triggers for the base buttons 
-    //------------------------------------
-    if (PS3NavDome->getButtonPress(UP) && !PS3NavDome->getButtonPress(CROSS) && !PS3NavDome->getButtonPress(CIRCLE) && !PS3NavDome->getButtonPress(L1) && !PS3NavDome->getButtonPress(PS) && !PS3NavFoot->getButtonPress(CROSS) && !PS3NavFoot->getButtonPress(CIRCLE) && !PS3NavFoot->getButtonPress(PS) && marcDuinoButtonCounter == 1)
-    {
-        FTbtnUP_MD.trigger();
-        return;
-    }
-    
-    if (PS3NavDome->getButtonPress(DOWN) && !PS3NavDome->getButtonPress(CROSS) && !PS3NavDome->getButtonPress(CIRCLE) && !PS3NavDome->getButtonPress(L1) && !PS3NavDome->getButtonPress(PS) && !PS3NavFoot->getButtonPress(CROSS) && !PS3NavFoot->getButtonPress(CIRCLE) && !PS3NavFoot->getButtonPress(PS) && marcDuinoButtonCounter == 1)
-    {
-        FTbtnDown_MD.trigger();
-        return;      
-    }
-    
-    if (PS3NavDome->getButtonPress(LEFT) && !PS3NavDome->getButtonPress(CROSS) && !PS3NavDome->getButtonPress(CIRCLE) && !PS3NavDome->getButtonPress(L1) && !PS3NavDome->getButtonPress(PS) && !PS3NavFoot->getButtonPress(CROSS) && !PS3NavFoot->getButtonPress(CIRCLE) && !PS3NavFoot->getButtonPress(PS) && marcDuinoButtonCounter == 1)
-    {
-        FTbtnLeft_MD.trigger();
-        return;
-    }
-
-    if (PS3NavDome->getButtonPress(RIGHT) && !PS3NavDome->getButtonPress(CROSS) && !PS3NavDome->getButtonPress(CIRCLE) && !PS3NavDome->getButtonPress(L1) && !PS3NavDome->getButtonPress(PS) && !PS3NavFoot->getButtonPress(CROSS) && !PS3NavFoot->getButtonPress(CIRCLE) && !PS3NavFoot->getButtonPress(PS) && marcDuinoButtonCounter == 1)
-    {
-        FTbtnRight_MD.trigger();
-        return;
-    }
-    
-    //------------------------------------ 
-    // Send triggers for the CROSS + base buttons 
-    //------------------------------------
-    if (PS3NavDome->getButtonPress(UP) && PS3NavFoot->getButtonPress(CROSS) && marcDuinoButtonCounter == 1)
-    {
-        FTbtnUP_CROSS_MD.trigger();
-        return;
-    }
-    
-    if (PS3NavDome->getButtonPress(DOWN) && PS3NavFoot->getButtonPress(CROSS) && marcDuinoButtonCounter == 1)
-    {
-        FTbtnDown_CROSS_MD.trigger();
-        return;
-    }
-    
-    if (PS3NavDome->getButtonPress(LEFT) && PS3NavFoot->getButtonPress(CROSS) && marcDuinoButtonCounter == 1)
-    {
-        FTbtnLeft_CROSS_MD.trigger();
-        return;
-    }
-
-    if (PS3NavDome->getButtonPress(RIGHT) && PS3NavFoot->getButtonPress(CROSS) && marcDuinoButtonCounter == 1)
-    {
-        FTbtnRight_CROSS_MD.trigger();
-        return;
-    }
-
-    //------------------------------------ 
-    // Send triggers for the CIRCLE + base buttons 
-    //------------------------------------
-    if (PS3NavDome->getButtonPress(UP) && PS3NavFoot->getButtonPress(CIRCLE) && marcDuinoButtonCounter == 1)
-    {
-        FTbtnUP_CIRCLE_MD.trigger();
-        return;
-    }
-    
-    if (PS3NavDome->getButtonPress(DOWN) && PS3NavFoot->getButtonPress(CIRCLE) && marcDuinoButtonCounter == 1)
-    {
-        FTbtnDown_CIRCLE_MD.trigger();
-        return;
-    }
-    
-    if (PS3NavDome->getButtonPress(LEFT) && PS3NavFoot->getButtonPress(CIRCLE) && marcDuinoButtonCounter == 1)
-    {
-        FTbtnLeft_CIRCLE_MD.trigger();
-        return;
-    }
-
-    if (PS3NavDome->getButtonPress(RIGHT) && PS3NavFoot->getButtonPress(CIRCLE) && marcDuinoButtonCounter == 1)
-    {
-        FTbtnRight_CIRCLE_MD.trigger();
-        return;
-    }
-    
-    //------------------------------------ 
-    // Send triggers for the L1 + base buttons 
-    //------------------------------------
-    if (PS3NavDome->getButtonPress(UP) && PS3NavDome->getButtonPress(L1) && marcDuinoButtonCounter == 1)
-    {
-        FTbtnUP_L1_MD.trigger();
-        return;
-    }
-    
-    if (PS3NavDome->getButtonPress(DOWN) && PS3NavDome->getButtonPress(L1) && marcDuinoButtonCounter == 1)
-    {
-        FTbtnDown_L1_MD.trigger();
-        return;
-    }
-    
-    if (PS3NavDome->getButtonPress(LEFT) && PS3NavDome->getButtonPress(L1) && marcDuinoButtonCounter == 1)
-    {
-        FTbtnLeft_L1_MD.trigger();
-        return;
-    }
-
-    if (PS3NavDome->getButtonPress(RIGHT) && PS3NavDome->getButtonPress(L1) && marcDuinoButtonCounter == 1)
-    {
-        FTbtnRight_L1_MD.trigger();
-        return;
-    }
-    
-    //------------------------------------ 
-    // Send triggers for the PS + base buttons 
-    //------------------------------------
-    if (PS3NavDome->getButtonPress(UP) && PS3NavFoot->getButtonPress(PS) && marcDuinoButtonCounter == 1)
-    {
-        FTbtnUP_PS_MD.trigger();
-        return;
-    }
-    
-    if (PS3NavDome->getButtonPress(DOWN) && PS3NavFoot->getButtonPress(PS) && marcDuinoButtonCounter == 1)
-    {
-        FTbtnDown_PS_MD.trigger();
-        return;
-    }
-    
-    if (PS3NavDome->getButtonPress(LEFT) && PS3NavFoot->getButtonPress(PS) && marcDuinoButtonCounter == 1)
-    {
-        FTbtnLeft_PS_MD.trigger();
-        return;
-    }
-
-    if (PS3NavDome->getButtonPress(RIGHT) && PS3NavFoot->getButtonPress(PS) && marcDuinoButtonCounter == 1)
-    {
-        FTbtnRight_PS_MD.trigger();
-        return;
-    }
+    handleToggleActions(action);
 }
 
 
@@ -1659,101 +1325,6 @@ void autoDome()
     }
 }
 
-// =======================================================================================
-//           PS3 Controller Device Mgt Functions
-// =======================================================================================
-
-void onInitPS3NavFoot()
-{
-    String btAddress = getLastConnectedBtMAC();
-    PS3NavFoot->setLedOn(LED1);
-    isPS3NavigatonInitialized = true;
-    badPS3Data = 0;
-
-    SHADOW_DEBUG("\nBT Address of Last connected Device when FOOT PS3 Connected: %s\n", btAddress.c_str());
-    
-    if (btAddress == PS3ControllerFootMac || btAddress == PS3ControllerBackupFootMac)
-    {
-        SHADOW_DEBUG("\nWe have our FOOT controller connected.\n")
-          
-        mainControllerConnected = true;
-        WaitingforReconnect = true;
-    }
-    else if (PS3ControllerFootMac[0] == 'X')
-    {
-        SHADOW_DEBUG("\nAssigning %s as FOOT controller.\n", btAddress.c_str());
-          
-        preferences.putString(PREFERENCE_PS3_FOOT_MAC, btAddress.c_str());
-        PS3ControllerFootMac = btAddress;
-        mainControllerConnected = true;
-        WaitingforReconnect = true;
-    }
-    else
-    {
-        // Prevent connection from anything but the MAIN controllers          
-        SHADOW_DEBUG("\nWe have an invalid controller trying to connect as the FOOT controller, it will be dropped.\n")
-
-        FootMotor->stop();
-        DomeMotor->stop();
-        isFootMotorStopped = true;
-        footDriveSpeed = 0;
-        PS3NavFoot->setLedOff(LED1);
-        PS3NavFoot->disconnect();
-    
-        isPS3NavigatonInitialized = false;
-        mainControllerConnected = false;        
-    } 
-}
-
-void onInitPS3NavDome()
-{
-    String btAddress = getLastConnectedBtMAC();
-    PS3NavDome->setLedOn(LED1);
-    isSecondaryPS3NavigatonInitialized = true;
-    badPS3Data = 0;
-    
-    if (btAddress == PS3ControllerDomeMAC || btAddress == PS3ControllerBackupDomeMAC)
-    {
-        SHADOW_DEBUG("\nWe have our DOME controller connected.\n")
-          
-        domeControllerConnected = true;
-        WaitingforReconnectDome = true;
-    }
-    else if (PS3ControllerDomeMAC[0] == 'X')
-    {
-        SHADOW_DEBUG("\nAssigning %s as DOME controller.\n", btAddress.c_str());
-          
-        preferences.putString(PREFERENCE_PS3_DOME_MAC, btAddress.c_str());
-        PS3ControllerDomeMAC = btAddress;
-
-        domeControllerConnected = true;
-        WaitingforReconnectDome = true;
-    }
-    else
-    {
-        // Prevent connection from anything but the DOME controllers          
-        SHADOW_DEBUG("\nWe have an invalid controller trying to connect as the DOME controller, it will be dropped.\n")
-
-        FootMotor->stop();
-        DomeMotor->stop();
-        isFootMotorStopped = true;
-        footDriveSpeed = 0;
-        PS3NavDome->setLedOff(LED1);
-        PS3NavDome->disconnect();
-    
-        isSecondaryPS3NavigatonInitialized = false;
-        domeControllerConnected = false;        
-    } 
-}
-
-String getLastConnectedBtMAC()
-{
-    char buffer[20];
-    uint8_t* addr = Btd.disc_bdaddr;
-    snprintf(buffer, sizeof(buffer), "%02X:%02X:%02X:%02X:%02X:%02X",
-        addr[0], addr[1], addr[2], addr[3], addr[4], addr[5]);
-    return buffer;
-}
 
 bool criticalFaultDetect()
 {
