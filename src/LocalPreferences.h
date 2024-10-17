@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Preferences.h>
+#include <ReelTwo.h>
 #include <core/StringUtils.h>
 
 //#define USE_PREFERENCES

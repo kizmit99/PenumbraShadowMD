@@ -30,4 +30,8 @@ public:
     virtual void clearFault() = 0;
     virtual int8_t getJoystick(Controller controller, Axis axis) = 0;
     virtual String getAction() = 0;
+    virtual void setStatusChangedCallback(void (*callback)(GameController*)) = 0;
+    virtual void setTimeoutWindow(uint32_t timeoutMs) = 0;
+    virtual void setSensitiveTimeoutWindow(uint32_t timeoutMs) = 0;
+    virtual void enableSensitiveTimeout(bool enable = true) = 0;
 };

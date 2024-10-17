@@ -2,62 +2,94 @@
 #include "GameController.h"
 #include <PS3BT.h>
 #include <usbhub.h>
+#include "../LocalPreferences.h"
 
 #ifndef SHADOW_DEBUG
 #define SHADOW_DEBUG(...)
 #endif
 
-//Forward Declarations
-void onInitPS3NavFootCB();
-void onInitPS3NavDomeCB();
+#define PREFERENCE_PS3_FOOT_MAC        "ps3footmac"
+#define PREFERENCE_PS3_DOME_MAC        "ps3domemac"
+#define PS3_CONTROLLER_DEFAULT_MAC     "XX:XX:XX:XX:XX:XX"
+#define PS3_CONTROLLER_FOOT_MAC        PS3_CONTROLLER_DEFAULT_MAC
+#define PS3_CONTROLLER_DOME_MAC        PS3_CONTROLLER_DEFAULT_MAC
+#define PS3_CONTROLLER_BACKUP_FOOT_MAC PS3_CONTROLLER_DEFAULT_MAC
+#define PS3_CONTROLLER_BACKUP_DOME_MAC PS3_CONTROLLER_DEFAULT_MAC
+
 
 class DualSonyMoveController : public GameController {
 public:
 
-    DualSonyMoveController() :
+    DualSonyMoveController(const char* preferenceNamespace) :
         Btd(&Usb),
         PS3NavFootImpl(&Btd),
-        PS3NavDomeImpl(&Btd)
+        PS3NavDomeImpl(&Btd),
+        preferences(preferenceNamespace)
     {
+        if (DualSonyMoveController::instance != NULL) {
+            SHADOW_DEBUG("\nFATAL Problem - constructor for DualSonyMoveController called more than once!\r\n");
+            while (1);
+        }
+        DualSonyMoveController::instance = this;
         PS3NavFoot = &PS3NavFootImpl;
         PS3NavDome = &PS3NavDomeImpl;
 
         //Setup for PS3
-        PS3NavFoot->attachOnInit(onInitPS3NavFootCB); // called upon a new connection
-        PS3NavDome->attachOnInit(onInitPS3NavDomeCB);
+        PS3NavFoot->attachOnInit(DualSonyMoveController::onInitPS3NavFootWrapper);
+        PS3NavDome->attachOnInit(DualSonyMoveController::onInitPS3NavDomeWrapper);
     }
 
     //Implement the GameController Interface methods
 
     bool init() {
+        PS3ControllerFootMAC = preferences.getString(PREFERENCE_PS3_FOOT_MAC, PS3_CONTROLLER_FOOT_MAC);
+        PS3ControllerDomeMAC = preferences.getString(PREFERENCE_PS3_DOME_MAC, PS3_CONTROLLER_DOME_MAC);
+
         return (Usb.Init() == 0);
     }
 
     void task() {
-        //TODO
+        Usb.Task();
     }
 
+    void setStatusChangedCallback(void (*callback)(GameController*)) {
+        this->statusChangeCallback = callback;
+    }
+
+
     bool isConnected() {
-        //TODO
-        return false;
+        return mainControllerConnected;
     }
 
     bool hasFault() {
-        //TODO
-        return true;
+        return isFaulted;
     }
 
     void clearFault() {
-        //TODO
+        badPS3Data = 0;
+        badPS3DataDome = 0;
+        isFaulted = false;
     }
 
-    int8_t getJoystick(Controller controller, Axis axis) {
+    void setTimeoutWindow(uint32_t timeoutMs) {
+        timeoutWindow = timeoutMs;
+    }
+
+    void setSensitiveTimeoutWindow(uint32_t timeoutMs) {
+        sensitiveTimeoutWindow = timeoutMs;
+    }
+
+    void enableSensitiveTimeout(bool enable = true) {
+        sensitiveTimeoutEnabled = enable;
+    }
+
+    int8_t getJoystick(GameController::Controller controller, GameController::Axis axis) {
         //Return the requested joystick, but if returning drive stick need to ensure that Neither L1 nor L2 is pressed on the stick controller
         //If only the drive controller is connected (no dome controller), then L2 pressed on drive controller means dome joystick
         //Note that (apparently) the PS3 joystick X/Y axis designations are reversed from GameController X/Y
         //Also note that this method returns an int, not a uint!  Range is -128 to 127, not 0 to 255!
 
-        if (!PS3NavFoot) {
+        if (!PS3NavFoot->PS3NavigationConnected) {
             return 0;
         }
 
@@ -68,10 +100,10 @@ public:
                 }
                 switch (axis) {
                     case X:
-                        return PS3NavFoot->getAnalogHat(LeftHatY);
+                        return (PS3NavFoot->getAnalogHat(LeftHatY) - 128);
 
                     case Y:
-                        return PS3NavFoot->getAnalogHat(LeftHatX);
+                        return (PS3NavFoot->getAnalogHat(LeftHatX) - 128);
 
                     default:
                         return 0;
@@ -79,8 +111,8 @@ public:
 
             case Dome: {
                 PS3BT* ps3 = PS3NavDome;
-                if (ps3 == NULL) {
-                    if ((PS3NavFoot != NULL) && (PS3NavFoot->getButtonPress(L2))) {
+                if (!ps3->PS3NavigationConnected) {
+                    if (PS3NavFoot->PS3NavigationConnected && (PS3NavFoot->getButtonPress(L2))) {
                         ps3 = PS3NavFoot;
                     } else {
                         return 0;
@@ -88,10 +120,10 @@ public:
                 }
                 switch (axis) {
                     case X:
-                        return ps3->getAnalogHat(LeftHatY);
+                        return (ps3->getAnalogHat(LeftHatY) - 128);
 
                     case Y:
-                        return ps3->getAnalogHat(LeftHatX);
+                        return (ps3->getAnalogHat(LeftHatX) - 128);
 
                     default:
                         return 0;
@@ -101,6 +133,7 @@ public:
             default:
                 return 0;
         }
+        return 0;
     }
 
     String getAction() {
@@ -399,14 +432,6 @@ public:
 
     //Methods required to wrap the original PS3 code
 
-    PS3BT* getPS3NavFoot() {
-        return PS3NavFoot;
-    }
-
-    PS3BT* getPS3NavDome() {
-        return PS3NavDome;
-    }
-
     void onInitPS3NavFoot() {
         String btAddress = getLastConnectedBtMAC();
         PS3NavFoot->setLedOn(LED1);
@@ -426,8 +451,7 @@ public:
         {
             SHADOW_DEBUG("\nAssigning %s as FOOT controller.\n", btAddress.c_str());
             
-//TODO - Preferences
-            //preferences.putString(PREFERENCE_PS3_FOOT_MAC, btAddress.c_str());
+            preferences.putString(PREFERENCE_PS3_FOOT_MAC, btAddress.c_str());
             PS3ControllerFootMAC = btAddress;
             mainControllerConnected = true;
             WaitingforReconnect = true;
@@ -437,17 +461,13 @@ public:
             // Prevent connection from anything but the MAIN controllers          
             SHADOW_DEBUG("\nWe have an invalid controller trying to connect as the FOOT controller, it will be dropped.\n")
 
-//TODO - Talk to Motors
-            // FootMotor->stop();
-            // DomeMotor->stop();
-            // isFootMotorStopped = true;
-            // footDriveSpeed = 0;
             PS3NavFoot->setLedOff(LED1);
             PS3NavFoot->disconnect();
         
             isPS3NavigatonInitialized = false;
             mainControllerConnected = false;        
         } 
+        statusChangeCallback(this);
     }
 
     void onInitPS3NavDome() {
@@ -467,8 +487,7 @@ public:
         {
             SHADOW_DEBUG("\nAssigning %s as DOME controller.\n", btAddress.c_str());
             
-//TODO - Preferences
-            //preferences.putString(PREFERENCE_PS3_DOME_MAC, btAddress.c_str());
+            preferences.putString(PREFERENCE_PS3_DOME_MAC, btAddress.c_str());
             PS3ControllerDomeMAC = btAddress;
 
             domeControllerConnected = true;
@@ -479,17 +498,13 @@ public:
             // Prevent connection from anything but the DOME controllers          
             SHADOW_DEBUG("\nWe have an invalid controller trying to connect as the DOME controller, it will be dropped.\n")
 
-//TODO - Talk to Motors
-            // FootMotor->stop();
-            // DomeMotor->stop();
-            // isFootMotorStopped = true;
-            // footDriveSpeed = 0;
             PS3NavDome->setLedOff(LED1);
             PS3NavDome->disconnect();
         
             isSecondaryPS3NavigatonInitialized = false;
             domeControllerConnected = false;        
         } 
+        statusChangeCallback(this);
     }
 
     String getLastConnectedBtMAC() {
@@ -500,6 +515,176 @@ public:
         return buffer;
     }
 
+    void criticalFaultDetect()
+    {
+        if (PS3NavFoot->PS3NavigationConnected || PS3NavFoot->PS3Connected)
+        {
+            currentTime = millis();
+            lastMsgTime = PS3NavFoot->getLastMessageTime();
+            msgLagTime = currentTime - lastMsgTime;            
+            
+            if (WaitingforReconnect)
+            {
+                if (msgLagTime < 200)
+                {             
+                    WaitingforReconnect = false; 
+                }
+                lastMsgTime = currentTime;            
+            } 
+
+            if (currentTime >= lastMsgTime)
+            {
+                msgLagTime = currentTime - lastMsgTime;
+            }
+            else
+            {
+                msgLagTime = 0;
+            }
+            
+            if (sensitiveTimeoutEnabled && (msgLagTime > sensitiveTimeoutWindow))
+            {
+                isFaulted = true;
+                statusChangeCallback(this);
+            }
+            
+            if (msgLagTime > timeoutWindow)
+            {
+                isFaulted = true;
+                statusChangeCallback(this);
+                PS3NavFoot->disconnect();
+                WaitingforReconnect = true;
+                return;
+            }
+
+            //Check PS3 Signal Data
+            if(!PS3NavFoot->getStatus(Plugged) && !PS3NavFoot->getStatus(Unplugged))
+            {
+                //We don't have good data from the controller.
+                //Wait 15ms if no second controller - 100ms if some controller connected, Update USB, and try again
+                if (PS3NavDome->PS3NavigationConnected)
+                {
+                    delay(100);     
+                } else
+                {
+                    delay(15);
+                }
+                
+                lastMsgTime = PS3NavFoot->getLastMessageTime();
+                
+                if(!PS3NavFoot->getStatus(Plugged) && !PS3NavFoot->getStatus(Unplugged))
+                {
+                    badPS3Data++;
+                    SHADOW_DEBUG("\n**Invalid data from PS3 FOOT Controller. - Resetting Data**\n")
+                    return;
+                }
+            }
+            else if (badPS3Data > 0)
+            {
+
+                badPS3Data = 0;
+            }
+            
+            if ( badPS3Data > 10 )
+            {
+                SHADOW_DEBUG("Too much bad data coming from the PS3 FOOT Controller\n")
+                SHADOW_DEBUG("Disconnecting the controller and stop motors.\n")
+
+                isFaulted = true;
+                statusChangeCallback(this);
+                PS3NavFoot->disconnect();
+                WaitingforReconnect = true;
+                return;
+            }
+        }
+        else if (sensitiveTimeoutEnabled)
+        {
+            SHADOW_DEBUG("No foot controller was found\n")
+            SHADOW_DEBUG("Shuting down motors and watching for a new PS3 foot message\n")
+
+            isFaulted = true;
+            statusChangeCallback(this);
+            WaitingforReconnect = true;
+            return;
+        }
+    }
+
+    void criticalFaultDetectDome()
+    {
+        if (PS3NavDome->PS3NavigationConnected || PS3NavDome->PS3Connected)
+        {
+            currentTime = millis();
+            lastMsgTime = PS3NavDome->getLastMessageTime();
+            msgLagTime = currentTime - lastMsgTime;            
+            
+            if (WaitingforReconnectDome)
+            {
+                if (msgLagTime < 200)
+                {
+                    WaitingforReconnectDome = false; 
+                }            
+                lastMsgTime = currentTime;
+            }
+            
+            if (currentTime >= lastMsgTime)
+            {
+                msgLagTime = currentTime - lastMsgTime;
+                
+            }
+            else
+            {
+                msgLagTime = 0;
+            }
+            
+            if (msgLagTime > timeoutWindow)
+            {
+                SHADOW_DEBUG("It has been 10s since we heard from the PS3 Dome Controller\nmsgLagTime:%u  lastMsgTime:%u  millis: %lu\n",
+                            msgLagTime, lastMsgTime, millis())
+                SHADOW_DEBUG("Disconnecting the Foot controller\n")
+                
+                isFaulted = true;
+                statusChangeCallback(this);
+                PS3NavDome->disconnect();
+                WaitingforReconnectDome = true;
+                return;
+            }
+
+            //Check PS3 Signal Data
+            if (!PS3NavDome->getStatus(Plugged) && !PS3NavDome->getStatus(Unplugged))
+            {
+                // We don't have good data from the controller.
+                //Wait 100ms, Update USB, and try again
+                delay(100);
+                
+                // Usb.Task();
+                lastMsgTime = PS3NavDome->getLastMessageTime();
+                
+                if(!PS3NavDome->getStatus(Plugged) && !PS3NavDome->getStatus(Unplugged))
+                {
+                    badPS3DataDome++;
+                    SHADOW_DEBUG("\n**Invalid data from PS3 Dome Controller. - Resetting Data**\n")
+                    return;
+                }
+            }
+            else if (badPS3DataDome > 0)
+            {
+                badPS3DataDome = 0;
+            }
+            
+            if (badPS3DataDome > 10)
+            {
+                SHADOW_DEBUG("Too much bad data coming from the PS3 DOME Controller\n")
+                SHADOW_DEBUG("Disconnecting the controller and stop motors.\n")
+
+                isFaulted = true;
+                statusChangeCallback(this);
+                PS3NavDome->disconnect();
+                WaitingforReconnectDome = true;
+                return;
+            }
+        }
+    }
+
+
 private:
     ///////Setup for USB and Bluetooth Devices////////////////////////////
     USB Usb;
@@ -509,6 +694,11 @@ private:
     PS3BT* PS3NavFoot;
     PS3BT* PS3NavDome;
 
+    LocalPreferences preferences;
+
+    static DualSonyMoveController* instance;
+    void (*statusChangeCallback)(GameController*);
+
     bool isPS3NavigatonInitialized = false;
     bool isSecondaryPS3NavigatonInitialized = false;
     bool mainControllerConnected = false;
@@ -516,25 +706,29 @@ private:
     bool WaitingforReconnect = false;
     bool WaitingforReconnectDome = false;
 
+    //Used for PS3 Fault Detection
+    uint32_t msgLagTime = 0;
+    uint32_t lastMsgTime = 0;
+    uint32_t currentTime = 0;
+    uint32_t lastLoopTime = 0;
     int badPS3Data = 0;
     int badPS3DataDome = 0;
+    bool isFaulted = false;
+    uint32_t timeoutWindow = 10000;
+    uint32_t sensitiveTimeoutWindow = 0;
+    bool sensitiveTimeoutEnabled = false;
 
-    String PS3ControllerFootMAC;
-    String PS3ControllerDomeMAC;
-    String PS3ControllerBackupFootMAC;
-    String PS3ControllerBackupDomeMAC;
+    String PS3ControllerFootMAC = PS3_CONTROLLER_FOOT_MAC;
+    String PS3ControllerDomeMAC = PS3_CONTROLLER_DOME_MAC;
+    String PS3ControllerBackupFootMAC = PS3_CONTROLLER_BACKUP_FOOT_MAC;
+    String PS3ControllerBackupDomeMAC = PS3_CONTROLLER_BACKUP_DOME_MAC;
+
+    static void onInitPS3NavFootWrapper() {
+        instance->onInitPS3NavFoot();
+    }
+    static void onInitPS3NavDomeWrapper() {
+        instance->onInitPS3NavDome();
+    }
 };
 
-extern DualSonyMoveController sonyControllers;
-
-// =======================================================================================
-//           PS3 Controller Device callback Functions
-// =======================================================================================
-
-void onInitPS3NavFootCB() {
-    sonyControllers.onInitPS3NavFoot();
-}
-
-void onInitPS3NavDomeCB() {
-    sonyControllers.onInitPS3NavDome();
-}
+DualSonyMoveController* DualSonyMoveController::instance = NULL;

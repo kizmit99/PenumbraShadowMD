@@ -121,15 +121,6 @@
 // Marcduino serial communication baud rate. Default 9600
 #define DEFAULT_MARCDUINO_BAUD              9600
 
-#define PS3_CONTROLLER_FOOT_MAC       "XX:XX:XX:XX:XX:XX"  //Set this to your FOOT PS3 controller MAC address
-#define PS3_CONTROLLER_DOME_MAC       "XX:XX:XX:XX:XX:XX"  //Set to a secondary DOME PS3 controller MAC address (Optional)
-
-String PS3ControllerFootMac = PS3_CONTROLLER_FOOT_MAC;
-String PS3ControllerDomeMAC = PS3_CONTROLLER_DOME_MAC;
-
-String PS3ControllerBackupFootMac = "XX";  //Set to the MAC Address of your BACKUP FOOT controller (Optional)
-String PS3ControllerBackupDomeMAC = "XX";  //Set to the MAC Address of your BACKUP DOME controller (Optional)
-
 byte drivespeed1 = DEFAULT_DRIVE_SPEED_NORMAL;
 byte drivespeed2 = DEFAULT_DRIVE_SPEED_OVER_THROTTLE;
 byte turnspeed = DEFAULT_TURN_SPEED;
@@ -151,8 +142,6 @@ int time360DomeTurn = DEFAULT_AUTO_DOME_TURN_TIME;
 #include "LocalPreferences.h"
 LocalPreferences preferences(PREFERENCE_NAMESPACE);
 
-#define PREFERENCE_PS3_FOOT_MAC             "ps3footmac"
-#define PREFERENCE_PS3_DOME_MAC             "ps3domemac"
 #define PREFERENCE_MARCSOUND                "msound"
 #define PREFERENCE_MARCSOUND_VOLUME         "mvolume"
 #define PREFERENCE_MARCSOUND_STARTUP        "msoundstart"
@@ -208,9 +197,6 @@ MotorDriver *DomeMotor = &DomeDriverImpl;
 #include <core/SetupEvent.h>
 #include <core/StringUtils.h>
 
-#include <PS3BT.h>
-#include <usbhub.h>
-
 // Satisfy IDE, which only needs to see the include statment in the ino.
 #ifdef dobogusinclude
 #include <spi4teensy3.h>
@@ -235,57 +221,26 @@ long currentMillis = millis();
 int serialLatency = 25;   //This is a delay factor in ms to prevent queueing of the Serial data.
                           //25ms seems approprate for HardwareSerial, values of 50ms or larger are needed for Softare Emulation
                           
-int marcDuinoButtonCounter = 0;
 int speedToggleButtonCounter = 0;
-int domeToggleButtonCounter = 0;
 
 //Forward declarations
-void onInitPS3NavFoot();
-void onInitPS3NavDome();
-bool readUSB();
 void footMotorDrive();
 void domeDrive();
 void custMarcDuinoPanel();
 void autoDome();
-String getLastConnectedBtMAC();
 void triggerActions();
+void statusChangeCallback(GameController* controller);
 
-// ///////Setup for USB and Bluetooth Devices////////////////////////////
-// USB Usb;
-// BTD Btd(&Usb);
-// PS3BT PS3NavFootImpl(&Btd);
-// PS3BT PS3NavDomeImpl(&Btd);
-// PS3BT* PS3NavFoot=&PS3NavFootImpl;
-// PS3BT* PS3NavDome=&PS3NavDomeImpl;
+// ///////Setup for Conrollers////////////////////////////
 
-DualSonyMoveController sonyControllers;
-GameController* controller = &sonyControllers;
-
-//Used for PS3 Fault Detection
-uint32_t msgLagTime = 0;
-uint32_t lastMsgTime = 0;
-uint32_t currentTime = 0;
-uint32_t lastLoopTime = 0;
-int badPS3Data = 0;
-int badPS3DataDome = 0;
-
-bool firstMessage = true;
+DualSonyMoveController sonyController(PREFERENCE_NAMESPACE);
+GameController* controller = &sonyController;
 
 bool isFootMotorStopped = true;
 bool isDomeMotorStopped = true;
 
 bool overSpeedSelected = false;
-
-bool isPS3NavigatonInitialized = false;
-bool isSecondaryPS3NavigatonInitialized = false;
-
 bool isStickEnabled = true;
-
-bool WaitingforReconnect = false;
-bool WaitingforReconnectDome = false;
-
-bool mainControllerConnected = false;
-bool domeControllerConnected = false;
 
 // Dome Automation Variables
 bool domeAutomation = false;
@@ -294,9 +249,6 @@ float domeTargetPosition = 0; // (0 - 359) - degrees in a circle, 0 = home
 unsigned long domeStopTurnTime = 0;    // millis() when next turn should stop
 unsigned long domeStartTurnTime = 0;  // millis() when next turn should start
 int domeStatus = 0;  // 0 = stopped, 1 = prepare to turn, 2 = turning
-
-byte action = 0;
-unsigned long DriveMillis = 0;
 
 int footDriveSpeed = 0;
 
@@ -323,10 +275,13 @@ int footDriveSpeed = 0;
 // =======================================================================================
 void setup()
 {
-    REELTWO_READY();
+    //Setup for GameController
+    controller->setStatusChangedCallback(statusChangeCallback);
+    controller->setTimeoutWindow(10000);
+    controller->setSensitiveTimeoutWindow(300);
+    controller->enableSensitiveTimeout(false);
 
-    PS3ControllerFootMac = preferences.getString(PREFERENCE_PS3_FOOT_MAC, PS3_CONTROLLER_FOOT_MAC);
-    PS3ControllerDomeMAC = preferences.getString(PREFERENCE_PS3_DOME_MAC, PS3_CONTROLLER_DOME_MAC);
+    REELTWO_READY();
 
     drivespeed1 = preferences.getInt(PREFERENCE_SPEED_NORMAL, DEFAULT_DRIVE_SPEED_NORMAL);
     drivespeed2 = preferences.getInt(PREFERENCE_SPEED_OVER_THROTTLE, DEFAULT_DRIVE_SPEED_OVER_THROTTLE);
@@ -345,10 +300,6 @@ void setup()
     PrintReelTwoInfo(Serial, "Penumbra Shadow MD");
 
     DEBUG_PRINTLN("Bluetooth Library Started");
-
-    // //Setup for PS3
-    // PS3NavFoot->attachOnInit(onInitPS3NavFoot); // onInitPS3NavFoot is called upon a new connection
-    // PS3NavDome->attachOnInit(onInitPS3NavDome);
 
     //Setup for Motor Controllers
     MOTOR_SERIAL_INIT(motorControllerBaudRate);
@@ -432,11 +383,9 @@ void loop()
 {
     DomeMotor->task();
     FootMotor->task();
+    controller->enableSensitiveTimeout(!isFootMotorStopped);
+    controller->task();
 
-    //LOOP through functions from highest to lowest priority.
-    if (!readUSB())
-        return;
-    
     footMotorDrive();
     domeDrive();
     triggerActions();
@@ -883,7 +832,7 @@ bool ps3FootMotorDrive()
     int stickSpeed = 0;
     int turnnum = 0;
   
-    if (isPS3NavigatonInitialized)
+    if (controller->isConnected())
     {    
          // Additional fault control.  Do NOT send additional commands to motord if no controllers have initialized.
         if (!isStickEnabled)
@@ -920,7 +869,7 @@ bool ps3FootMotorDrive()
         }
         else
         {
-            int joystickPosition = controller->getJoystick(GameController::Drive, GameController::Y);
+            int joystickPosition = controller->getJoystick(GameController::Drive, GameController::X);
           
             if (overSpeedSelected) //Over throttle is selected
             {
@@ -1068,10 +1017,11 @@ int ps3DomeDrive()
     int joystickPosition = controller->getJoystick(GameController::Dome, GameController::Y);
         
     domeRotationSpeed = (map(joystickPosition, -128, 127, -domespeed, domespeed));
-    if ( abs(joystickPosition) < joystickDomeDeadZoneRange ) 
+    if ( abs(joystickPosition) < joystickDomeDeadZoneRange ) {
        domeRotationSpeed = 0;
+    }
           
-    if (domeRotationSpeed != 0 && domeAutomation == true)  // Turn off dome automation if manually moved
+    if ((domeRotationSpeed != 0) && (domeAutomation == true))  // Turn off dome automation if manually moved
     {   
         domeAutomation = false; 
         domeStatus = 0;
@@ -1079,6 +1029,7 @@ int ps3DomeDrive()
         
         SHADOW_VERBOSE("Dome Automation OFF\n")
     }    
+
     return domeRotationSpeed;
 }
 
@@ -1119,14 +1070,9 @@ void domeDrive()
     if ((millis() - previousDomeMillis) < (2*serialLatency))
         return;
   
-    int domeRotationSpeed = 0;
-    int ps3NavControlSpeed = 0;
     if (controller->isConnected()) 
     {
-        ps3NavControlSpeed = ps3DomeDrive();
-        domeRotationSpeed = ps3NavControlSpeed; 
-
-        rotateDome(domeRotationSpeed,"Controller Move");
+        rotateDome(ps3DomeDrive(),"Controller Move");
     }
     else if (!isDomeMotorStopped)
     {
@@ -1214,10 +1160,12 @@ void triggerActions() {
         //Nothing to do here
         return;
     }
+
+    //Allow auto-repeat of actions
     uint32_t now = millis();
     if ((action == lastAction) &&
         ((now - lastActionTime) < 1000)) {
-        //Skip it
+        //Not enough time has passed, skip it
         return;
     }
     lastAction = action;
@@ -1325,222 +1273,24 @@ void autoDome()
     }
 }
 
+void statusChangeCallback(GameController* controller) {
+    if (!controller->isConnected()) {
+        SHADOW_DEBUG("Controller is no longer connected\n")
+        SHADOW_DEBUG("Stopping the motors.\n")
+        FootMotor->stop();
+        isFootMotorStopped = true;
+        footDriveSpeed = 0;
 
-bool criticalFaultDetect()
-{
-    if (PS3NavFoot->PS3NavigationConnected || PS3NavFoot->PS3Connected)
-    {
-        currentTime = millis();
-        lastMsgTime = PS3NavFoot->getLastMessageTime();
-        msgLagTime = currentTime - lastMsgTime;            
-        
-        if (WaitingforReconnect)
-        {
-            if (msgLagTime < 200)
-            {             
-                WaitingforReconnect = false; 
-            }
-            lastMsgTime = currentTime;            
-        } 
-
-        if (currentTime >= lastMsgTime)
-        {
-            msgLagTime = currentTime - lastMsgTime;
-        }
-        else
-        {
-            msgLagTime = 0;
-        }
-        
-        if (msgLagTime > 300 && !isFootMotorStopped)
-        {
-            SHADOW_DEBUG("It has been 300ms since we heard from the PS3 Foot Controller\n")
-            SHADOW_DEBUG("Shutting down motors, and watching for a new PS3 Foot message\n")
-            FootMotor->stop();
-            isFootMotorStopped = true;
-            footDriveSpeed = 0;
-        }
-        
-        if ( msgLagTime > 10000 )
-        {
-            SHADOW_DEBUG("It has been 10s since we heard from the PS3 Foot Controller\nmsgLagTime:%u  lastMsgTime:%u  millis: %lu\n",
-                          msgLagTime, lastMsgTime, millis())
-            SHADOW_DEBUG("Disconnecting the Foot controller\n")
-            FootMotor->stop();
-            isFootMotorStopped = true;
-            footDriveSpeed = 0;
-            PS3NavFoot->disconnect();
-            WaitingforReconnect = true;
-            return true;
-        }
-
-        //Check PS3 Signal Data
-        if(!PS3NavFoot->getStatus(Plugged) && !PS3NavFoot->getStatus(Unplugged))
-        {
-            //We don't have good data from the controller.
-            //Wait 15ms if no second controller - 100ms if some controller connected, Update USB, and try again
-            if (PS3NavDome->PS3NavigationConnected)
-            {
-                  delay(100);     
-            } else
-            {
-                  delay(15);
-            }
-            
-            // Usb.Task();   
-            lastMsgTime = PS3NavFoot->getLastMessageTime();
-            
-            if(!PS3NavFoot->getStatus(Plugged) && !PS3NavFoot->getStatus(Unplugged))
-            {
-                badPS3Data++;
-                SHADOW_DEBUG("\n**Invalid data from PS3 FOOT Controller. - Resetting Data**\n")
-                return true;
-            }
-        }
-        else if (badPS3Data > 0)
-        {
-
-            badPS3Data = 0;
-        }
-        
-        if ( badPS3Data > 10 )
-        {
-            SHADOW_DEBUG("Too much bad data coming from the PS3 FOOT Controller\n")
-            SHADOW_DEBUG("Disconnecting the controller and stop motors.\n")
-
-            FootMotor->stop();
-            isFootMotorStopped = true;
-            footDriveSpeed = 0;
-            PS3NavFoot->disconnect();
-            WaitingforReconnect = true;
-            return true;
-        }
+        DomeMotor->stop();
     }
-    else if (!isFootMotorStopped)
-    {
-        SHADOW_DEBUG("No foot controller was found\n")
-        SHADOW_DEBUG("Shuting down motors and watching for a new PS3 foot message\n")
+    if (controller->hasFault()) {
+        SHADOW_DEBUG("Controller has indicated a fault\n")
+        SHADOW_DEBUG("Stopping the motors.\n")
 
         FootMotor->stop();
         isFootMotorStopped = true;
         footDriveSpeed = 0;
-        WaitingforReconnect = true;
-        return true;
+
+        DomeMotor->stop();
     }
-    
-    return false;
-}
-
-bool criticalFaultDetectDome()
-{
-    if (PS3NavDome->PS3NavigationConnected || PS3NavDome->PS3Connected)
-    {
-        currentTime = millis();
-        lastMsgTime = PS3NavDome->getLastMessageTime();
-        msgLagTime = currentTime - lastMsgTime;            
-        
-        if (WaitingforReconnectDome)
-        {
-            if (msgLagTime < 200)
-            {
-                WaitingforReconnectDome = false; 
-            }            
-            lastMsgTime = currentTime;
-        }
-        
-        if (currentTime >= lastMsgTime)
-        {
-            msgLagTime = currentTime - lastMsgTime;
-              
-        }
-        else
-        {
-            msgLagTime = 0;
-        }
-        
-        if ( msgLagTime > 10000 )
-        {
-            SHADOW_DEBUG("It has been 10s since we heard from the PS3 Dome Controller\nmsgLagTime:%u  lastMsgTime:%u  millis: %lu\n",
-                          msgLagTime, lastMsgTime, millis())
-            SHADOW_DEBUG("Disconnecting the Foot controller\n")
-            
-            DomeMotor->stop();
-            PS3NavDome->disconnect();
-            WaitingforReconnectDome = true;
-            return true;
-        }
-
-        //Check PS3 Signal Data
-        if (!PS3NavDome->getStatus(Plugged) && !PS3NavDome->getStatus(Unplugged))
-        {
-            // We don't have good data from the controller.
-            //Wait 100ms, Update USB, and try again
-            delay(100);
-            
-            // Usb.Task();
-            lastMsgTime = PS3NavDome->getLastMessageTime();
-            
-            if(!PS3NavDome->getStatus(Plugged) && !PS3NavDome->getStatus(Unplugged))
-            {
-                badPS3DataDome++;
-                SHADOW_DEBUG("\n**Invalid data from PS3 Dome Controller. - Resetting Data**\n")
-                return true;
-            }
-        }
-        else if (badPS3DataDome > 0)
-        {
-            badPS3DataDome = 0;
-        }
-        
-        if (badPS3DataDome > 10)
-        {
-            SHADOW_DEBUG("Too much bad data coming from the PS3 DOME Controller\n")
-            SHADOW_DEBUG("Disconnecting the controller and stop motors.\n")
-
-            DomeMotor->stop();
-            PS3NavDome->disconnect();
-            WaitingforReconnectDome = true;
-            return true;
-        }
-    }
-    return false;
-}
-
-// =======================================================================================
-//           USB Read Function - Supports Main Program Loop
-// =======================================================================================
-
-bool readUSB()
-{     
-    Usb.Task();
-
-    //The more devices we have connected to the USB or BlueTooth, the more often Usb.Task need to be called to eliminate latency.
-    if (PS3NavFoot->PS3NavigationConnected) 
-    {
-        if (criticalFaultDetect())
-        {
-            //We have a fault condition that we want to ensure that we do NOT process any controller data!!!
-            return false;
-        }   
-    }
-    else if (!isFootMotorStopped)
-    {
-        SHADOW_DEBUG("No foot controller was found\n")
-        SHADOW_DEBUG("Shuting down motors, and watching for a new PS3 foot message\n")
-
-        FootMotor->stop();
-        isFootMotorStopped = true;
-        footDriveSpeed = 0;
-        WaitingforReconnect = true;
-    }
-    
-    if (PS3NavDome->PS3NavigationConnected) 
-    {
-        if (criticalFaultDetectDome())
-        {
-           //We have a fault condition that we want to ensure that we do NOT process any controller data!!!
-           return false;
-        }
-    }    
-    return true;
 }
