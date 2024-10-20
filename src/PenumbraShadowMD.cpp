@@ -73,7 +73,8 @@
 #include "pin-map.h"
 #include "motor/MotorDriver.h"
 #include "controller/GameController.h"
-#include "controller/DualSonyMoveController.h"
+//#include "controller/DualSonyMoveController.h"
+#include "controller/DualRingController.h"
 #include "MarcduinoTriggers.h"
 
 //#define USE_MP3_TRIGGER
@@ -233,8 +234,9 @@ void statusChangeCallback(GameController* controller);
 
 // ///////Setup for Conrollers////////////////////////////
 
-DualSonyMoveController sonyController(PREFERENCE_NAMESPACE);
-GameController* controller = &sonyController;
+//DualSonyMoveController implController(PREFERENCE_NAMESPACE);
+DualRingController implController(PREFERENCE_NAMESPACE);
+GameController* controller = &implController;
 
 bool isFootMotorStopped = true;
 bool isDomeMotorStopped = true;
@@ -869,7 +871,9 @@ bool ps3FootMotorDrive()
         }
         else
         {
-            int joystickPosition = controller->getJoystick(GameController::Drive, GameController::X);
+            int joystickPosition = controller->getJoystick(GameController::Drive, GameController::Y);
+
+            if (joystickPosition != 0) {SHADOW_VERBOSE("ps3FootMotorDrive() joystick(drive, y) = %d\n", joystickPosition);}
           
             if (overSpeedSelected) //Over throttle is selected
             {
@@ -944,18 +948,19 @@ bool ps3FootMotorDrive()
                     footDriveSpeed = stickSpeed;  
                 }
             }
-            uint8_t joystick_Y = controller->getJoystick(GameController::Drive, GameController::Y);
-            turnnum = joystick_Y;
+            uint8_t joystick_X = controller->getJoystick(GameController::Drive, GameController::X);
+            if (joystick_X != 0) {SHADOW_VERBOSE("ps3FootMotorDrive() joystick(drive, X) = %d\n", joystick_X);}
+            turnnum = joystick_X;
 
             //TODO:  Is there a better algorithm here?  
             if ( abs(footDriveSpeed) > 50)
-                turnnum = (map(joystick_Y, -74, 72, -(turnspeed/4), (turnspeed/4)));
+                turnnum = (map(joystick_X, -74, 72, -(turnspeed/4), (turnspeed/4)));
             else if (turnnum <= 72 && turnnum >= -74)
-                turnnum = (map(joystick_Y, -74, 72, -(turnspeed/3), (turnspeed/3)));
+                turnnum = (map(joystick_X, -74, 72, -(turnspeed/3), (turnspeed/3)));
             else if (turnnum > 72)
-                turnnum = (map(joystick_Y, 73, 127, turnspeed/3, turnspeed));
+                turnnum = (map(joystick_X, 73, 127, turnspeed/3, turnspeed));
             else if (turnnum < -74)
-                turnnum = (map(joystick_Y, -128, -75, -turnspeed, -(turnspeed/3)));
+                turnnum = (map(joystick_X, -128, -75, -turnspeed, -(turnspeed/3)));
               
             if (abs(turnnum) > 5)
             {
@@ -1003,6 +1008,7 @@ void footMotorDrive()
         return;
   
     if (controller->isConnected())
+//        SHADOW_VERBOSE("footMotorDrive() controller is Connected: %d", controller->isConnected());
         ps3FootMotorDrive();
 }  
 
@@ -1014,7 +1020,7 @@ void footMotorDrive()
 int ps3DomeDrive()
 {
     int domeRotationSpeed = 0;
-    int joystickPosition = controller->getJoystick(GameController::Dome, GameController::Y);
+    int joystickPosition = controller->getJoystick(GameController::Dome, GameController::X);
         
     domeRotationSpeed = (map(joystickPosition, -128, 127, -domespeed, domespeed));
     if ( abs(joystickPosition) < joystickDomeDeadZoneRange ) {
