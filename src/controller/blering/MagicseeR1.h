@@ -20,6 +20,8 @@ public:
         X, Y
     };
 
+    enum Mode {MODE_A, MODE_B, MODE_C, MODE_D, MODE_UNKNOWN};
+
     bool isConnected = false;
 
     void handleReport(uint8_t *report, int length);
@@ -27,22 +29,22 @@ public:
     bool isButtonPressed(Button button);
     bool isButtonClicked(Button button);
     const char* getAdvertisedName() {return "Magicsee R1";}
-    char *getMode();
+    Mode getMode() {return currentMode;}
     void printState();
+    void unpress(Button button);
 
 private:
     static const uint8_t buttonCount = ((uint8_t) RIGHT) + 1;
-    enum Mode {MODE_A, MODE_B, MODE_C, MODE_D, MODE_UNKNOWN};
 
     bool pressedButtons[buttonCount];
     bool clickedButtons[buttonCount];
     Mode currentMode = MODE_UNKNOWN;
 
     const char *modeString(Mode mode);
+    void unexpected(volatile void *report, size_t length);
     void testForModeChange(volatile uint8_t *report, int length);
     void clearAllButtons();
     void press(Button button);
-    void unpress(Button button);
     void click(Button button);
     void unclick(Button button);
 };

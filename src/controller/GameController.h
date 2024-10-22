@@ -34,4 +34,5 @@ public:
     virtual void setTimeoutWindow(uint32_t timeoutMs) = 0;
     virtual void setSensitiveTimeoutWindow(uint32_t timeoutMs) = 0;
     virtual void enableSensitiveTimeout(bool enable = true) = 0;
+    virtual void printState() = 0;
 };

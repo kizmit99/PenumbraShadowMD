@@ -93,6 +93,9 @@ public:
             requestedPWM = 0;
             lastCommandMs = now;
         }
+        if (lastUpdateMs > now) {
+            lastUpdateMs = now;
+        }
         if (requestedPWM != currentPWM) {
             SHADOW_DEBUG("DRV8871.task requestPWM=%d, currentPWM=%d\n", requestedPWM, currentPWM);
             int16_t delta = abs(currentPWM - requestedPWM);
@@ -108,9 +111,9 @@ public:
                     currentPWM = min(255, currentPWM + delta);
                 }
                 setMotorSpeed(currentPWM);
-                lastUpdateMs = now;
             }
         }
+        lastUpdateMs = now;
     }
 
 

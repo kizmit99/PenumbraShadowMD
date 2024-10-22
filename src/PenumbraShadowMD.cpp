@@ -948,7 +948,7 @@ bool ps3FootMotorDrive()
                     footDriveSpeed = stickSpeed;  
                 }
             }
-            uint8_t joystick_X = controller->getJoystick(GameController::Drive, GameController::X);
+            int8_t joystick_X = controller->getJoystick(GameController::Drive, GameController::X);
             if (joystick_X != 0) {SHADOW_VERBOSE("ps3FootMotorDrive() joystick(drive, X) = %d\n", joystick_X);}
             turnnum = joystick_X;
 
@@ -1020,7 +1020,7 @@ void footMotorDrive()
 int ps3DomeDrive()
 {
     int domeRotationSpeed = 0;
-    int joystickPosition = controller->getJoystick(GameController::Dome, GameController::X);
+    int8_t joystickPosition = controller->getJoystick(GameController::Dome, GameController::X);
         
     domeRotationSpeed = (map(joystickPosition, -128, 127, -domespeed, domespeed));
     if ( abs(joystickPosition) < joystickDomeDeadZoneRange ) {
@@ -1163,15 +1163,29 @@ void triggerActions() {
     String action = controller->getAction();
     if ((action == NULL) ||
         (action.equals(""))) {
-        //Nothing to do here
+        lastAction = "";
         return;
     }
 
-    //Allow auto-repeat of actions
+//Try disabling the auto-repeat
+    // //Allow auto-repeat of actions
+    // uint32_t now = millis();
+    // if ((action == lastAction) &&
+    //     ((now - lastActionTime) < 1000)) {
+    //     //Not enough time has passed, skip it
+    //     return;
+    // }
+    // lastAction = action;
+    // lastActionTime = now;
+
+//Try a govenor on actions
     uint32_t now = millis();
-    if ((action == lastAction) &&
-        ((now - lastActionTime) < 1000)) {
+    if ((now - lastActionTime) < 1000) {
         //Not enough time has passed, skip it
+        return;
+    }
+    if (action == lastAction) {
+        //Don't auto-repeat
         return;
     }
     lastAction = action;
@@ -1179,6 +1193,8 @@ void triggerActions() {
 
     MarcduinoButtonAction* mdAction = MarcduinoButtonAction::findAction(action);
     if (mdAction != NULL) {
+        SHADOW_VERBOSE("Action: %s\n",action.c_str());
+        controller->printState();
         mdAction->trigger();
         return;
     }

@@ -12,8 +12,8 @@ const char* MagicseeR1::modeString(Mode mode) {
     }
 }
 
-void unexpected(volatile void *report, size_t length, char *mode) {
-    DBG_printf("Unexpected message in Mode-%s: ", mode);
+void MagicseeR1::unexpected(volatile void *report, size_t length) {
+    DBG_printf("Unexpected message in Mode-%s: ", modeString(getMode()));
     DBG_printHex((void *) report, length);
     DBG_println();
 }
@@ -91,7 +91,7 @@ void MagicseeR1::handleReport(uint8_t *report, int length) {
                 } else if (report[0] == 0x20) {
                     press(RIGHT);
                 } else {
-                    unexpected(report, length, getMode());
+                    unexpected(report, length);
                 }
             } else if (length == 2) {   // Report Type 4
                 if ((report[0] == 0x00) && (report[1] == 0x50)) {
@@ -100,10 +100,10 @@ void MagicseeR1::handleReport(uint8_t *report, int length) {
                     press(L1);
                     click(L1);
                 } else {
-                    unexpected(report, length, getMode());
+                    unexpected(report, length);
                 }
             } else {
-                unexpected(report, length, getMode());
+                unexpected(report, length);
             }
             break;
 
@@ -141,10 +141,10 @@ void MagicseeR1::handleReport(uint8_t *report, int length) {
                 } else if ((report[0] == 0x00) && (report[1] == 0x60)) {
                     press(RIGHT);
                 } else {
-                    unexpected(report, length, getMode());
+                    unexpected(report, length);
                 }
             } else {
-                unexpected(report, length, getMode());
+                unexpected(report, length);
             }
             break;
 
@@ -156,7 +156,7 @@ void MagicseeR1::handleReport(uint8_t *report, int length) {
                     press(C);
                     click(C);
                 } else {
-                    unexpected(report, length, getMode());
+                    unexpected(report, length);
                 }
             } else if (length == 2) {   // Report type 4
                 if ((report[0] == 0x00) && (report[1] == 0x50)) {
@@ -173,10 +173,10 @@ void MagicseeR1::handleReport(uint8_t *report, int length) {
                 } else if ((report[0] == 0x00) && (report[1] == 0x60)) {
                     press(RIGHT);
                 } else {
-                    unexpected(report, length, getMode());
+                    unexpected(report, length);
                 }
             } else {
-                unexpected(report, length, getMode());
+                unexpected(report, length);
             }
             break;
             
@@ -192,7 +192,7 @@ void MagicseeR1::handleReport(uint8_t *report, int length) {
                     press(D);
                     click(D);
                 } else {
-                    unexpected(report, length, getMode());
+                    unexpected(report, length);
                 }
             } else if (length == 2) {   // Report type 4
                 if ((report[0] == 0x00) && (report[1] == 0x50)) {
@@ -203,7 +203,7 @@ void MagicseeR1::handleReport(uint8_t *report, int length) {
                 } else if ((report[0] == 0x02) && (report[1] == 0x50)) {
                     press(B);
                 } else {
-                    unexpected(report, length, getMode());
+                    unexpected(report, length);
                 }
             } else if (length == 4) {   // Report type 1
                 if ((report[0] == 0x00) && (report[1] == 0x00) && (report[2] == 0x00) && (report[3] == 0x00)) {
@@ -219,6 +219,10 @@ void MagicseeR1::handleReport(uint8_t *report, int length) {
                 } else if ((report[0] == 0x01) && (report[1] == 0x00) && (report[2] == 0x00) && (report[3] == 0x00)) {
                     press(L2);
                     click(L2);
+                    unpress(UP);
+                    unpress(DOWN);
+                    unpress(LEFT);
+                    unpress(RIGHT);
                 } else {
                     if (report[0] == 0x01) {
                         press(L2);
@@ -246,11 +250,11 @@ void MagicseeR1::handleReport(uint8_t *report, int length) {
                         unpress(LEFT);
                         unpress(RIGHT);
                     } else {
-                        unexpected(report, length, getMode());
+                        unexpected(report, length);
                     }
                 }
             } else {
-                unexpected(report, length, getMode());
+                unexpected(report, length);
             }
             break;
     }
@@ -266,12 +270,9 @@ bool MagicseeR1::isButtonPressed(Button button) {
 }
 
 bool MagicseeR1::isButtonClicked(Button button) {
-    return clickedButtons[button];
+    bool isClicked = clickedButtons[button];
     unclick(button);
-}
-
-char *MagicseeR1::getMode() {
-    return (char *) modeString(currentMode);
+    return isClicked;
 }
 
 void MagicseeR1::testForModeChange(volatile uint8_t *report, int length) {
@@ -356,7 +357,7 @@ void MagicseeR1::testForModeChange(volatile uint8_t *report, int length) {
 }
 
 void MagicseeR1::printState() {
-    DBG_printf("Ring state: MODE-%s : ", getMode());
+    DBG_printf("Ring state: MODE-%s : ", modeString(getMode()));
     if (isButtonPressed(MagicseeR1::A)) DBG_print("A."); else DBG_print(" .");
     if (isButtonPressed(MagicseeR1::B)) DBG_print("B."); else DBG_print(" .");
     if (isButtonPressed(MagicseeR1::C)) DBG_print("C."); else DBG_print(" .");

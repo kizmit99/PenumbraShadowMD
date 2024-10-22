@@ -13,7 +13,7 @@
 class DualRingBLE {
 public:
     enum Modifier {
-        A, B};
+        A, B, L2};
 
     enum Button {
         Up, Down, Left, Right};
@@ -38,6 +38,7 @@ public:
 
     bool isConnected();
     bool hasFault();
+    void printState();
 
     bool isModifierPressed(Controller controller, Modifier button);
     bool isButtonPressed(Controller controller, Button button);

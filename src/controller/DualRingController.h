@@ -79,10 +79,7 @@ public:
     }
 
     int8_t getJoystick(GameController::Controller controller, GameController::Axis axis) {
-        //Return the requested joystick, but if returning drive stick need to ensure that Neither L1 nor L2 is pressed on the stick controller
-        //If only the drive controller is connected (no dome controller), then L2 pressed on drive controller means dome joystick
-        //Note that (apparently) the PS3 joystick X/Y axis designations are reversed from GameController X/Y
-        //Also note that this method returns an int, not a uint!  Range is -128 to 127, not 0 to 255!
+        //Note that this method returns an int, not a uint!  Range is -128 to 127, not 0 to 255!
 
         DualRingBLE::Controller mappedController;
         if (controller == GameController::Drive) {
@@ -101,7 +98,193 @@ public:
 
     String getAction() {
         //TODO - Note, returns the triggers defined in terms of Sony Buttons!
-        return String("");
+        //This method also needs to handle turning continuous button presses into a single action (possibly repeating)
+        //Ok, that's not true.  Apparently the calling code handles that.
+
+        const char* rawAction = getRawAction();
+        // if (rawAction != "") {
+        //     SHADOW_DEBUG("Action: %s\n", rawAction);
+        //     rings.printState();
+        // }
+        return rawAction;
+    }
+
+    void printState() {
+        rings.printState();
+    }
+
+    const char* getRawAction() {
+        if (rings.isButtonClicked(DualRingBLE::Drive, DualRingBLE::L1)) return "FTbtnDown_MD";
+
+        if (rings.isModifierPressed(DualRingBLE::Drive, DualRingBLE::B) &&
+            !rings.isModifierPressed(DualRingBLE::Dome, DualRingBLE::A) &&
+            !rings.isModifierPressed(DualRingBLE::Dome, DualRingBLE::B) &&
+            !rings.isModifierPressed(DualRingBLE::Dome, DualRingBLE::L2) &&
+            rings.isButtonPressed(DualRingBLE::Dome, DualRingBLE::Up)) return "btnUP_CROSS_MD";
+
+        if (rings.isModifierPressed(DualRingBLE::Drive, DualRingBLE::B) &&
+            !rings.isModifierPressed(DualRingBLE::Dome, DualRingBLE::A) &&
+            !rings.isModifierPressed(DualRingBLE::Dome, DualRingBLE::B) &&
+            !rings.isModifierPressed(DualRingBLE::Dome, DualRingBLE::L2) &&
+            rings.isButtonPressed(DualRingBLE::Dome, DualRingBLE::Down)) return "btnDown_CROSS_MD";
+
+        if (rings.isModifierPressed(DualRingBLE::Drive, DualRingBLE::B) &&
+            !rings.isModifierPressed(DualRingBLE::Dome, DualRingBLE::A) &&
+            !rings.isModifierPressed(DualRingBLE::Dome, DualRingBLE::B) &&
+            !rings.isModifierPressed(DualRingBLE::Dome, DualRingBLE::L2) &&
+            rings.isButtonPressed(DualRingBLE::Dome, DualRingBLE::Left)) return "FTbtnDown_CROSS_MD";
+
+        if (rings.isModifierPressed(DualRingBLE::Drive, DualRingBLE::B) &&
+            !rings.isModifierPressed(DualRingBLE::Dome, DualRingBLE::A) &&
+            !rings.isModifierPressed(DualRingBLE::Dome, DualRingBLE::B) &&
+            !rings.isModifierPressed(DualRingBLE::Dome, DualRingBLE::L2) &&
+            rings.isButtonPressed(DualRingBLE::Dome, DualRingBLE::Right)) return "FTbtnUP_CROSS_MD";
+
+        if (!rings.isModifierPressed(DualRingBLE::Drive, DualRingBLE::A) &&
+            !rings.isModifierPressed(DualRingBLE::Drive, DualRingBLE::B) &&
+            rings.isModifierPressed(DualRingBLE::Dome, DualRingBLE::A) &&
+            !rings.isModifierPressed(DualRingBLE::Dome, DualRingBLE::L2) &&
+            rings.isButtonPressed(DualRingBLE::Dome, DualRingBLE::Up)) return "FTbtnUP_L1_MD";
+
+        if (!rings.isModifierPressed(DualRingBLE::Drive, DualRingBLE::A) &&
+            !rings.isModifierPressed(DualRingBLE::Drive, DualRingBLE::B) &&
+            rings.isModifierPressed(DualRingBLE::Dome, DualRingBLE::A) &&
+            !rings.isModifierPressed(DualRingBLE::Dome, DualRingBLE::L2) &&
+            rings.isButtonPressed(DualRingBLE::Dome, DualRingBLE::Down)) return "FTbtnDown_L1_MD";
+
+        if (!rings.isModifierPressed(DualRingBLE::Drive, DualRingBLE::A) &&
+            !rings.isModifierPressed(DualRingBLE::Drive, DualRingBLE::B) &&
+            rings.isModifierPressed(DualRingBLE::Dome, DualRingBLE::A) &&
+            !rings.isModifierPressed(DualRingBLE::Dome, DualRingBLE::L2) &&
+            rings.isButtonPressed(DualRingBLE::Dome, DualRingBLE::Left)) return "btnDown_L1_MD";
+
+        if (!rings.isModifierPressed(DualRingBLE::Drive, DualRingBLE::A) &&
+            !rings.isModifierPressed(DualRingBLE::Drive, DualRingBLE::B) &&
+            rings.isModifierPressed(DualRingBLE::Dome, DualRingBLE::A) &&
+            !rings.isModifierPressed(DualRingBLE::Dome, DualRingBLE::L2) &&
+            rings.isButtonPressed(DualRingBLE::Dome, DualRingBLE::Right)) return "";
+
+        if (!rings.isModifierPressed(DualRingBLE::Drive, DualRingBLE::A) &&
+            !rings.isModifierPressed(DualRingBLE::Drive, DualRingBLE::B) &&
+            rings.isModifierPressed(DualRingBLE::Dome, DualRingBLE::B) &&
+            !rings.isModifierPressed(DualRingBLE::Dome, DualRingBLE::L2) &&
+            rings.isButtonPressed(DualRingBLE::Dome, DualRingBLE::Up)) return "btnUP_MD";
+
+        if (!rings.isModifierPressed(DualRingBLE::Drive, DualRingBLE::A) &&
+            !rings.isModifierPressed(DualRingBLE::Drive, DualRingBLE::B) &&
+            rings.isModifierPressed(DualRingBLE::Dome, DualRingBLE::B) &&
+            !rings.isModifierPressed(DualRingBLE::Dome, DualRingBLE::L2) &&
+            rings.isButtonPressed(DualRingBLE::Dome, DualRingBLE::Down)) return "btnDown_MD";
+
+        if (!rings.isModifierPressed(DualRingBLE::Drive, DualRingBLE::A) &&
+            !rings.isModifierPressed(DualRingBLE::Drive, DualRingBLE::B) &&
+            rings.isModifierPressed(DualRingBLE::Dome, DualRingBLE::B) &&
+            !rings.isModifierPressed(DualRingBLE::Dome, DualRingBLE::L2) &&
+            rings.isButtonPressed(DualRingBLE::Dome, DualRingBLE::Left)) return "btnLeft_MD";
+
+        if (!rings.isModifierPressed(DualRingBLE::Drive, DualRingBLE::A) &&
+            !rings.isModifierPressed(DualRingBLE::Drive, DualRingBLE::B) &&
+            rings.isModifierPressed(DualRingBLE::Dome, DualRingBLE::B) &&
+            !rings.isModifierPressed(DualRingBLE::Dome, DualRingBLE::L2) &&
+            rings.isButtonPressed(DualRingBLE::Dome, DualRingBLE::Right)) return "btnRight_MD";
+
+        if (!rings.isModifierPressed(DualRingBLE::Drive, DualRingBLE::A) &&
+            !rings.isModifierPressed(DualRingBLE::Drive, DualRingBLE::B) &&
+            !rings.isModifierPressed(DualRingBLE::Drive, DualRingBLE::L2) &&
+            rings.isModifierPressed(DualRingBLE::Dome, DualRingBLE::A) &&
+            rings.isButtonPressed(DualRingBLE::Drive, DualRingBLE::Up)) return "FTbtnUP_MD";
+
+        if (!rings.isModifierPressed(DualRingBLE::Drive, DualRingBLE::A) &&
+            !rings.isModifierPressed(DualRingBLE::Drive, DualRingBLE::B) &&
+            !rings.isModifierPressed(DualRingBLE::Drive, DualRingBLE::L2) &&
+            rings.isModifierPressed(DualRingBLE::Dome, DualRingBLE::A) &&
+            rings.isButtonPressed(DualRingBLE::Drive, DualRingBLE::Down)) return "btnUP_L1_MD";
+
+        if (!rings.isModifierPressed(DualRingBLE::Drive, DualRingBLE::A) &&
+            !rings.isModifierPressed(DualRingBLE::Drive, DualRingBLE::B) &&
+            !rings.isModifierPressed(DualRingBLE::Drive, DualRingBLE::L2) &&
+            rings.isModifierPressed(DualRingBLE::Dome, DualRingBLE::A) &&
+            rings.isButtonPressed(DualRingBLE::Drive, DualRingBLE::Left)) return "btnDown_L1_MD";
+
+        if (!rings.isModifierPressed(DualRingBLE::Drive, DualRingBLE::A) &&
+            !rings.isModifierPressed(DualRingBLE::Drive, DualRingBLE::B) &&
+            !rings.isModifierPressed(DualRingBLE::Drive, DualRingBLE::L2) &&
+            rings.isModifierPressed(DualRingBLE::Dome, DualRingBLE::A) &&
+            rings.isButtonPressed(DualRingBLE::Drive, DualRingBLE::Right)) return "btnUP_CIRCLE_MD";
+
+        if (!rings.isModifierPressed(DualRingBLE::Drive, DualRingBLE::A) &&
+            !rings.isModifierPressed(DualRingBLE::Drive, DualRingBLE::B) &&
+            !rings.isModifierPressed(DualRingBLE::Drive, DualRingBLE::L2) &&
+            rings.isModifierPressed(DualRingBLE::Dome, DualRingBLE::B) &&
+            rings.isButtonPressed(DualRingBLE::Drive, DualRingBLE::Up)) return "btnDown_CIRCLE_MD";
+
+        if (!rings.isModifierPressed(DualRingBLE::Drive, DualRingBLE::A) &&
+            !rings.isModifierPressed(DualRingBLE::Drive, DualRingBLE::B) &&
+            !rings.isModifierPressed(DualRingBLE::Drive, DualRingBLE::L2) &&
+            rings.isModifierPressed(DualRingBLE::Dome, DualRingBLE::B) &&
+            rings.isButtonPressed(DualRingBLE::Drive, DualRingBLE::Down)) return "btnRight_CIRCLE_MD";
+
+        if (!rings.isModifierPressed(DualRingBLE::Drive, DualRingBLE::A) &&
+            !rings.isModifierPressed(DualRingBLE::Drive, DualRingBLE::B) &&
+            !rings.isModifierPressed(DualRingBLE::Drive, DualRingBLE::L2) &&
+            rings.isModifierPressed(DualRingBLE::Dome, DualRingBLE::B) &&
+            rings.isButtonPressed(DualRingBLE::Drive, DualRingBLE::Left)) return "btnLeft_CIRCLE_MD";
+
+        if (!rings.isModifierPressed(DualRingBLE::Drive, DualRingBLE::A) &&
+            !rings.isModifierPressed(DualRingBLE::Drive, DualRingBLE::B) &&
+            !rings.isModifierPressed(DualRingBLE::Drive, DualRingBLE::L2) &&
+            rings.isModifierPressed(DualRingBLE::Dome, DualRingBLE::B) &&
+            rings.isButtonPressed(DualRingBLE::Drive, DualRingBLE::Right)) return "btnLeft_L1_MD";
+
+        if (rings.isModifierPressed(DualRingBLE::Drive, DualRingBLE::A) &&
+            !rings.isModifierPressed(DualRingBLE::Drive, DualRingBLE::L2) &&
+            !rings.isModifierPressed(DualRingBLE::Dome, DualRingBLE::A) &&
+            !rings.isModifierPressed(DualRingBLE::Dome, DualRingBLE::B) &&
+            rings.isButtonPressed(DualRingBLE::Drive, DualRingBLE::Up)) return "FTbtnUP_L1_MD";
+
+        if (rings.isModifierPressed(DualRingBLE::Drive, DualRingBLE::A) &&
+            !rings.isModifierPressed(DualRingBLE::Drive, DualRingBLE::L2) &&
+            !rings.isModifierPressed(DualRingBLE::Dome, DualRingBLE::A) &&
+            !rings.isModifierPressed(DualRingBLE::Dome, DualRingBLE::B) &&
+            rings.isButtonPressed(DualRingBLE::Drive, DualRingBLE::Down)) return "FTbtnDown_L1_MD";
+
+        if (rings.isModifierPressed(DualRingBLE::Drive, DualRingBLE::A) &&
+            !rings.isModifierPressed(DualRingBLE::Drive, DualRingBLE::L2) &&
+            !rings.isModifierPressed(DualRingBLE::Dome, DualRingBLE::A) &&
+            !rings.isModifierPressed(DualRingBLE::Dome, DualRingBLE::B) &&
+            rings.isButtonPressed(DualRingBLE::Drive, DualRingBLE::Left)) return "FTbtnLeft_L1_MD";
+
+        if (rings.isModifierPressed(DualRingBLE::Drive, DualRingBLE::A) &&
+            !rings.isModifierPressed(DualRingBLE::Drive, DualRingBLE::L2) &&
+            !rings.isModifierPressed(DualRingBLE::Dome, DualRingBLE::A) &&
+            !rings.isModifierPressed(DualRingBLE::Dome, DualRingBLE::B) &&
+            rings.isButtonPressed(DualRingBLE::Drive, DualRingBLE::Right)) return "FTbtnRight_L1_MD";
+
+        if (rings.isModifierPressed(DualRingBLE::Drive, DualRingBLE::B) &&
+            !rings.isModifierPressed(DualRingBLE::Drive, DualRingBLE::L2) &&
+            !rings.isModifierPressed(DualRingBLE::Dome, DualRingBLE::A) &&
+            !rings.isModifierPressed(DualRingBLE::Dome, DualRingBLE::B) &&
+            rings.isButtonPressed(DualRingBLE::Drive, DualRingBLE::Up)) return "FTbtnUP_PS_MD";
+
+        if (rings.isModifierPressed(DualRingBLE::Drive, DualRingBLE::B) &&
+            !rings.isModifierPressed(DualRingBLE::Drive, DualRingBLE::L2) &&
+            !rings.isModifierPressed(DualRingBLE::Dome, DualRingBLE::A) &&
+            !rings.isModifierPressed(DualRingBLE::Dome, DualRingBLE::B) &&
+            rings.isButtonPressed(DualRingBLE::Drive, DualRingBLE::Down)) return "FTbtnDown_PS_MD";
+
+        if (rings.isModifierPressed(DualRingBLE::Drive, DualRingBLE::B) &&
+            !rings.isModifierPressed(DualRingBLE::Drive, DualRingBLE::L2) &&
+            !rings.isModifierPressed(DualRingBLE::Dome, DualRingBLE::A) &&
+            !rings.isModifierPressed(DualRingBLE::Dome, DualRingBLE::B) &&
+            rings.isButtonPressed(DualRingBLE::Drive, DualRingBLE::Left)) return "FTbtnLeft_PS_MD";
+
+        if (rings.isModifierPressed(DualRingBLE::Drive, DualRingBLE::B) &&
+            !rings.isModifierPressed(DualRingBLE::Drive, DualRingBLE::L2) &&
+            !rings.isModifierPressed(DualRingBLE::Dome, DualRingBLE::A) &&
+            !rings.isModifierPressed(DualRingBLE::Dome, DualRingBLE::B) &&
+            rings.isButtonPressed(DualRingBLE::Drive, DualRingBLE::Right)) return "FTbtnRight_PS_MD";
+
+        return "";
     }
 
 private:

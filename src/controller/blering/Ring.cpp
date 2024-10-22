@@ -31,27 +31,46 @@ void Ring::init() {
     connectTo = false;
 }
 
+void Ring::unpress(MagicseeR1::Button button) {
+    myRing.unpress(button);
+}
+
 void Ring::task() {
     if (!reportQueue.isEmpty()) {
         ReportRecord *newReport = reportQueue.getNextReport();
-//        DBG_printf("%s:", __func__);
-//        for (size_t i = 0; i < newReport->report_len; i++) {
-//            DBG_printf(" %02x", newReport->report[i]);
-//        }
-//        //DBG_printf(", head: %d, tail: %d, count: %d, empty: %d, full: %d", reportQueueHead, reportQueueTail, reportQueueCount, reportQueueEmpty(), reportQueueFull());
-//        DBG_println();
 
+        DBG_printf("%s:", __func__);
+        for (size_t i = 0; i < newReport->report_len; i++) {
+           DBG_printf(" %02x", newReport->report[i]);
+        }
+        //DBG_printf(", head: %d, tail: %d, count: %d, empty: %d, full: %d", reportQueueHead, reportQueueTail, reportQueueCount, reportQueueEmpty(), reportQueueFull());
+        DBG_println();
+
+        bool l2Before = myRing.isButtonPressed(MagicseeR1::L2);
         myRing.handleReport(newReport->report, newReport->report_len);
         reportQueue.releaseReportBuffer();
+        bool l2After = myRing.isButtonPressed(MagicseeR1::L2);
+        if (l2Before && !l2After) {
+            otherRing->unpress(MagicseeR1::A);
+            otherRing->unpress(MagicseeR1::B);
+        }
 //        myRing.printState();
     }
 }
 
 bool Ring::isButtonPressed(MagicseeR1::Button button) {
+    if ((myRing.getMode() != MagicseeR1::MODE_D) ||
+        (otherRing->getMode() != MagicseeR1::MODE_D)) {
+        return false;
+    }
     return myRing.isButtonPressed(button);
 }
 
 bool Ring::isButtonClicked(MagicseeR1::Button button) {
+    if ((myRing.getMode() != MagicseeR1::MODE_D) ||
+        (otherRing->getMode() != MagicseeR1::MODE_D)) {
+        return false;
+    }
     return myRing.isButtonClicked(button);
 }
 
@@ -60,9 +79,14 @@ bool Ring::isButtonClicked(MagicseeR1::Button button) {
 #define MID (SLOW + (FAST - SLOW)/2)
 
 int8_t Ring::getJoystick(MagicseeR1::Direction direction) {
+    if ((myRing.getMode() != MagicseeR1::MODE_D) ||
+        (otherRing->getMode() != MagicseeR1::MODE_D)) {
+        return 0;
+    }
     if (!isButtonPressed(MagicseeR1::L2)) {
         return 0;
     }
+    int8_t value = 0;
     int8_t range = MID;
     if (otherRing->isButtonPressed(MagicseeR1::A)) {
         range = SLOW;
@@ -72,23 +96,29 @@ int8_t Ring::getJoystick(MagicseeR1::Direction direction) {
     switch (direction) {
         case MagicseeR1::X:
             if (isButtonPressed(MagicseeR1::LEFT) && !isButtonPressed(MagicseeR1::RIGHT)) {
-                return -range;
+                value = -range;
+            } else if (isButtonPressed(MagicseeR1::RIGHT) && !isButtonPressed(MagicseeR1::LEFT)) {
+                value = range;
             }
-            if (isButtonPressed(MagicseeR1::RIGHT) && !isButtonPressed(MagicseeR1::LEFT)) {
-                return range;
-            }
-            return 0;
+            break;
 
         case MagicseeR1::Y:
             if (isButtonPressed(MagicseeR1::UP) && !isButtonPressed(MagicseeR1::DOWN)) {
-                return range;
+                value = range;
+            } else if (isButtonPressed(MagicseeR1::DOWN) && !isButtonPressed(MagicseeR1::UP)) {
+                value = -range;
             }
-            if (isButtonPressed(MagicseeR1::DOWN) && !isButtonPressed(MagicseeR1::UP)) {
-                return -range;
-            }
-            return 0;
+            break;
 
         default:
-            return 0;
+            value = 0;
     }
+    if (value != 0) {
+        printState();
+    }
+    return value;
+}
+
+void Ring::printState() {
+    myRing.printState();
 }

@@ -364,6 +364,7 @@ bool DualRingBLE::isModifierPressed(Controller controller, Modifier button) {
     switch (button) {
         case A:    return getRing(controller)->isButtonPressed(MagicseeR1::A);
         case B:    return getRing(controller)->isButtonPressed(MagicseeR1::B);
+        case L2:   return getRing(controller)->isButtonPressed(MagicseeR1::L2);
         default:   return false;
     }
 }
@@ -400,9 +401,23 @@ void DualRingBLE::setNamespace(const char* nspace) {
 }
 
 bool DualRingBLE::isConnected() {
-    return !(driveRing.waitingFor || domeRing.waitingFor);
+    if (driveRing.waitingFor || 
+        driveRing.connectTo ||
+        domeRing.waitingFor ||
+        domeRing.connectTo) {
+        return false;
+    } else {
+        return true;
+    }
 }
 
 bool DualRingBLE::hasFault() {
     return false;
+}
+
+void DualRingBLE::printState() {
+    DBG_print("Drive: ");
+    driveRing.printState();
+    DBG_print("Dome:  ");
+    domeRing.printState();
 }

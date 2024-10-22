@@ -26,6 +26,8 @@ public:
     void task();
 
     void setOtherRing(Ring *other) {otherRing = &(other->myRing);};
+    void unpress(MagicseeR1::Button button);
+    void printState();
 
 private:
     ReportQueue reportQueue;

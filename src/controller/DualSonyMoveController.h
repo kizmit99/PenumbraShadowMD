@@ -684,6 +684,10 @@ public:
         }
     }
 
+    void printState() {
+        //Nothing
+    }
+
 
 private:
     ///////Setup for USB and Bluetooth Devices////////////////////////////
