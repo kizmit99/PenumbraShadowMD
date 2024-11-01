@@ -34,4 +34,5 @@ private:
     MagicseeR1 myRing;
     MagicseeR1 *otherRing;
     uint32_t droppedReports = 0;
+    bool L2wasPressed = false;
 };

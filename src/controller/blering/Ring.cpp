@@ -63,7 +63,27 @@ bool Ring::isButtonPressed(MagicseeR1::Button button) {
         (otherRing->getMode() != MagicseeR1::MODE_D)) {
         return false;
     }
-    return myRing.isButtonPressed(button);
+
+    //Enforce U/D/L/R quiet until joystick has been centered after L2 Pressed
+    if (!myRing.isButtonPressed(MagicseeR1::UP) && 
+        !myRing.isButtonPressed(MagicseeR1::DOWN) &&
+        !myRing.isButtonPressed(MagicseeR1::LEFT) &&
+        !myRing.isButtonPressed(MagicseeR1::RIGHT)) {
+        L2wasPressed = false;
+    }
+    if (L2wasPressed &&
+        ((button == MagicseeR1::UP) ||
+         (button == MagicseeR1::DOWN) ||
+         (button == MagicseeR1::LEFT) ||
+         (button == MagicseeR1::RIGHT))) {
+        return false;
+    }
+    bool value = myRing.isButtonPressed(button);
+    if ((button == MagicseeR1::L2) &&
+        (value == true)) {
+        L2wasPressed = true;
+    }
+    return value;
 }
 
 bool Ring::isButtonClicked(MagicseeR1::Button button) {
@@ -95,17 +115,17 @@ int8_t Ring::getJoystick(MagicseeR1::Direction direction) {
     }
     switch (direction) {
         case MagicseeR1::X:
-            if (isButtonPressed(MagicseeR1::LEFT) && !isButtonPressed(MagicseeR1::RIGHT)) {
+            if (myRing.isButtonPressed(MagicseeR1::LEFT) && !myRing.isButtonPressed(MagicseeR1::RIGHT)) {
                 value = -range;
-            } else if (isButtonPressed(MagicseeR1::RIGHT) && !isButtonPressed(MagicseeR1::LEFT)) {
+            } else if (myRing.isButtonPressed(MagicseeR1::RIGHT) && !myRing.isButtonPressed(MagicseeR1::LEFT)) {
                 value = range;
             }
             break;
 
         case MagicseeR1::Y:
-            if (isButtonPressed(MagicseeR1::UP) && !isButtonPressed(MagicseeR1::DOWN)) {
+            if (myRing.isButtonPressed(MagicseeR1::UP) && !myRing.isButtonPressed(MagicseeR1::DOWN)) {
                 value = range;
-            } else if (isButtonPressed(MagicseeR1::DOWN) && !isButtonPressed(MagicseeR1::UP)) {
+            } else if (myRing.isButtonPressed(MagicseeR1::DOWN) && !myRing.isButtonPressed(MagicseeR1::UP)) {
                 value = -range;
             }
             break;
